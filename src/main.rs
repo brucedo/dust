@@ -12,16 +12,16 @@ fn main() {
 
     scan(&vk_entry);
 
-    let app_info_bldr = ApplicationInfo::builder()
+    let app_info_bldr = ApplicationInfo::default()
         .application_name(&CString::new("Dust").unwrap())
         .application_version(1)
         .api_version(ash::vk::make_api_version(0, 1, 3, 0))
         .engine_name(&CString::new("Dust").unwrap())
         .engine_version(1);
 
-    let instance_info_bldr = InstanceCreateInfo::builder();
+    let instance_info_bldr = InstanceCreateInfo::default().application_info(&app_info_bldr);
 
-    let instance = unsafe { vk_entry.create_instance(app_info_bldr.build(), allocation_callbacks) };
+    let instance = unsafe { vk_entry.create_instance(&instance_info_bldr, allocation_callbacks) };
 }
 
 fn scan(vk_entry: &Entry) {
