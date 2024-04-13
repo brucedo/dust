@@ -1,3 +1,5 @@
+mod setup;
+
 use ash::{
     vk::{ApplicationInfo, InstanceCreateInfo},
     Entry,
