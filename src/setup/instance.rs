@@ -8,7 +8,10 @@ pub fn instance() {
 
     let instance_info = InstanceCreateInfo::default()
         .application_info(&app_info)
-        .enabled_layer_names(CString::new("VK_KHR_xcb_surface").unwrap().into_raw());
+        .enabled_layer_names(&[CString::new("VK_KHR_xcb_surface")
+            .unwrap()
+            .as_c_str()
+            .as_ptr()]);
     todo!();
 }
 
