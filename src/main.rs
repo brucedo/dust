@@ -23,9 +23,10 @@ fn main() {
         .engine_name(app_name)
         .engine_version(1);
 
-    let instance_info_bldr = InstanceCreateInfo::default().application_info(&app_info_bldr);
+    let instance = setup::instance::instance(&vk_entry);
 
     // let instance = unsafe { vk_entry.create_instance(&instance_info_bldr, allocation_callbacks) };
+    unsafe { instance.destroy_instance(None) };
 }
 
 fn scan(vk_entry: &Entry) {
