@@ -16,6 +16,11 @@ pub fn init() -> ash::Entry {
 
 #[cfg(all(target_os = "linux", not(target_os = "windows")))]
 pub fn instance(entry: &ash::Entry) -> ash::Instance {
+    use crate::setup::xcb_window;
+
+    debug!("Starting X-Windows initialization...");
+    let conn = xcb_window::connect();
+    xcb_window::extension_data(&conn);
     debug!("Starting instance creation...");
     let app_name = CString::new("Dust for Linux").unwrap();
     let khr_surface_name = CString::new("VK_KHR_surface").unwrap();
