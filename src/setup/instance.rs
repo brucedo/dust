@@ -19,7 +19,7 @@ pub fn instance(entry: &ash::Entry) -> ash::Instance {
     use crate::setup::xcb_window;
 
     debug!("Starting X-Windows initialization...");
-    let conn = xcb_window::connect();
+    let (conn, screen_num) = xcb_window::connect();
     xcb_window::extension_data(&conn);
     debug!("Starting instance creation...");
     let app_name = CString::new("Dust for Linux").unwrap();
