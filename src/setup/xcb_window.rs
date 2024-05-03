@@ -1,9 +1,10 @@
 use core::panic;
+use std::{thread::sleep, time::Duration};
 
-use log::debug;
+use log::{debug, SetLoggerError};
 use xcb::{
     randr::GetMonitorsReply,
-    x::{self, Cw},
+    x::{self, Atom, Cw, MapWindow},
     Connection, Extension,
 };
 
@@ -97,6 +98,33 @@ pub fn interrogate_randr(conn: &Connection, display_num: i32) {
             )
         }
     }
+
+    let net_wm_win_state_cookie = conn.send_request(&x::InternAtom {
+        only_if_exists: true,
+        name: b"_NET_WM_STATE",
+    });
+    let net_wm_win_type = conn.wait_for_reply(net_wm_win_state_cookie).unwrap().atom();
+    let net_wm_win_state_fs_cookie = conn.send_request(&x::InternAtom {
+        only_if_exists: true,
+        name: b"_NET_WM_STATE_FULLSCREEN",
+    });
+    let net_wm_win_state_fs = conn
+        .wait_for_reply(net_wm_win_state_fs_cookie)
+        .unwrap()
+        .atom();
+
+    conn.send_request(&x::ChangeProperty {
+        mode: x::PropMode::Replace,
+        window: window_id,
+        property: net_wm_win_type,
+        r#type: x::ATOM_ATOM,
+        data: &[net_wm_win_state_fs],
+    });
+
+    conn.send_request_checked(&MapWindow { window: window_id });
+    conn.flush();
+
+    sleep(Duration::from_secs(10));
 
     conn.send_request(&x::DestroyWindow { window: window_id });
 }
