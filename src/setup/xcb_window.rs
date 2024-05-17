@@ -7,7 +7,7 @@ type Rect = (u32, u32);
 use log::debug;
 use xcb::{
     randr::GetMonitorsReply,
-    x::{self, Atom, ConfigWindow, Cw, MapWindow},
+    x::{self, Atom, ConfigWindow, Cw, EventMask, MapWindow},
     Connection, Error, Extension,
 };
 
@@ -72,12 +72,25 @@ pub fn interrogate_randr(conn: &Connection, display_num: i32) {
         border_width: 0,
         class: x::WindowClass::InputOutput,
         visual: parent_vis,
-        value_list: &[Cw::BackPixel(0x00555555)],
+        value_list: &[
+            Cw::BackPixel(0x00555555),
+            Cw::EventMask(
+                EventMask::KEY_PRESS
+                    | EventMask::KEY_RELEASE
+                    | EventMask::BUTTON_PRESS
+                    | EventMask::BUTTON_RELEASE
+                    | EventMask::POINTER_MOTION,
+            ),
+        ],
     };
 
     conn.send_request_checked(&our_window);
 
     if let Ok((upper_left, window_rect)) = find_best_region(conn, window_id) {
+        debug!(
+            "find_best_region has given us a bounding box of ({}, {})-({},{})",
+            upper_left.0, upper_left.1, window_rect.0, window_rect.1
+        );
         conn.send_request(&x::ConfigureWindow {
             window: window_id,
             value_list: &[
@@ -87,8 +100,19 @@ pub fn interrogate_randr(conn: &Connection, display_num: i32) {
                 ConfigWindow::Height(window_rect.1),
             ],
         });
-        conn.flush();
+        match conn.flush() {
+            Ok(_) => {
+                debug!("flush was successful")
+            }
+            Err(msg) => {
+                debug!("Flush failed?  {:?}", msg)
+            }
+        }
     }
+
+    debug!("Pausing to see if window manager will process the resize for us...");
+    sleep(Duration::from_secs(5));
+    debug!("Paused, and now we can check.");
 
     let net_wm_win_state_cookie = conn.send_request(&x::InternAtom {
         only_if_exists: true,
@@ -180,3 +204,5 @@ fn find_best_region(conn: &Connection, window_id: x::Window) -> Result<(Point, R
         )),
     }
 }
+
+fn event_loop(conn: Connection, channel: std::sync::mpsc::Sender) {}
