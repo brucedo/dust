@@ -16,14 +16,25 @@ pub fn init() -> ash::Entry {
 
 #[cfg(all(target_os = "linux", not(target_os = "windows")))]
 pub fn instance(entry: &ash::Entry) -> ash::Instance {
-    use log::warn;
+    use std::{
+        thread::{self, sleep},
+        time::Duration,
+    };
 
     use crate::setup::xcb_window;
 
     debug!("Starting X-Windows initialization...");
     let (conn, screen_num) = xcb_window::connect();
+    xcb_window::interrogate_keymaps(&conn);
     xcb_window::extension_data(&conn);
-    xcb_window::interrogate_randr(&conn, screen_num);
+    let window = xcb_window::create_window(&conn, screen_num);
+    let (upper_left, window_size) = xcb_window::interrogate_randr(&conn, window);
+    xcb_window::resize_window(&conn, window, upper_left, window_size);
+
+    let _xcb_ptr = conn.get_raw_conn();
+    thread::spawn(move || xcb_window::event_loop(conn));
+
+    sleep(Duration::from_secs(10));
 
     debug!("Starting instance creation...");
     let app_name = CString::new("Dust for Linux").unwrap();

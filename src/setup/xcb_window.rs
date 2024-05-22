@@ -1,18 +1,28 @@
 use core::panic;
-use std::{str::FromStr, thread::sleep, time::Duration, u32};
+use std::{
+    thread::{self, sleep},
+    u32,
+};
 
 type Point = (i32, i32);
 type Rect = (u32, u32);
 
-use log::debug;
+use log::{debug, warn};
 use xcb::{
-    randr::GetMonitorsReply,
-    x::{self, Atom, ConfigWindow, Cw, EventMask, MapWindow},
+    x::{self, Atom, ConfigWindow, Cw, EventMask, GetKeyboardMapping, MapWindow, Window},
+    xinput::{ListDeviceProperties, ListInputDevices},
+    xkb::{GetDeviceInfo, XiFeature},
     Connection, Error, Extension,
 };
 
 pub fn connect() -> (Connection, i32) {
-    let ext = [Extension::Dri2, Extension::Dri3, Extension::RandR];
+    let ext = [
+        Extension::Dri2,
+        Extension::Dri3,
+        Extension::RandR,
+        Extension::Xkb,
+        Extension::Input,
+    ];
     match xcb::Connection::connect_with_extensions(None, &ext, &[]) {
         Ok((conn, screen_num)) => {
             debug!("Connected to screen number {}", screen_num);
@@ -48,72 +58,7 @@ pub fn extension_data(conn: &Connection) {
     }
 }
 
-pub fn interrogate_randr(conn: &Connection, display_num: i32) {
-    let (parent_win, parent_vis, parent_depth) = if let Some(root) = conn
-        .get_setup()
-        .roots()
-        .nth(display_num.unsigned_abs() as usize)
-    {
-        (root.root(), root.root_visual(), root.root_depth())
-    } else {
-        panic!("Unable to capture the parent window!");
-    };
-
-    let window_id: x::Window = conn.generate_id();
-
-    let our_window = x::CreateWindow {
-        depth: parent_depth,
-        wid: window_id,
-        parent: parent_win,
-        x: 0,
-        y: 0,
-        width: 600,
-        height: 200,
-        border_width: 0,
-        class: x::WindowClass::InputOutput,
-        visual: parent_vis,
-        value_list: &[
-            Cw::BackPixel(0x00555555),
-            Cw::EventMask(
-                EventMask::KEY_PRESS
-                    | EventMask::KEY_RELEASE
-                    | EventMask::BUTTON_PRESS
-                    | EventMask::BUTTON_RELEASE
-                    | EventMask::POINTER_MOTION,
-            ),
-        ],
-    };
-
-    conn.send_request_checked(&our_window);
-
-    if let Ok((upper_left, window_rect)) = find_best_region(conn, window_id) {
-        debug!(
-            "find_best_region has given us a bounding box of ({}, {})-({},{})",
-            upper_left.0, upper_left.1, window_rect.0, window_rect.1
-        );
-        conn.send_request(&x::ConfigureWindow {
-            window: window_id,
-            value_list: &[
-                ConfigWindow::X(upper_left.0),
-                ConfigWindow::Y(upper_left.1),
-                ConfigWindow::Width(window_rect.0),
-                ConfigWindow::Height(window_rect.1),
-            ],
-        });
-        match conn.flush() {
-            Ok(_) => {
-                debug!("flush was successful")
-            }
-            Err(msg) => {
-                debug!("Flush failed?  {:?}", msg)
-            }
-        }
-    }
-
-    debug!("Pausing to see if window manager will process the resize for us...");
-    sleep(Duration::from_secs(5));
-    debug!("Paused, and now we can check.");
-
+pub fn resize_window(conn: &Connection, window_id: Window, upper_left: Point, dim: Rect) {
     let net_wm_win_state_cookie = conn.send_request(&x::InternAtom {
         only_if_exists: true,
         name: b"_NET_WM_STATE",
@@ -136,31 +81,74 @@ pub fn interrogate_randr(conn: &Connection, display_num: i32) {
         data: &[net_wm_win_state_fs],
     });
 
-    conn.send_request_checked(&MapWindow { window: window_id });
-
-    let geom_cookie = conn.send_request(&x::GetGeometry {
-        drawable: x::Drawable::Window(window_id),
+    conn.send_request(&x::ConfigureWindow {
+        window: window_id,
+        value_list: &[
+            ConfigWindow::X(upper_left.0),
+            ConfigWindow::Y(upper_left.1),
+            ConfigWindow::Width(dim.0),
+            ConfigWindow::Height(dim.1),
+        ],
     });
 
-    conn.flush();
+    conn.send_request_checked(&MapWindow { window: window_id });
 
-    if let Ok(geom_response) = conn.wait_for_reply(geom_cookie) {
-        debug!("Status of fullscreen window: ");
-        debug!(
-            "(x, y)/(width, height): ({}, {})/({}, {})",
-            geom_response.x(),
-            geom_response.y(),
-            geom_response.width(),
-            geom_response.height()
-        );
+    match conn.flush() {
+        Ok(_) => {
+            debug!("flush was successful")
+        }
+        Err(msg) => {
+            debug!("Flush failed?  {:?}", msg)
+        }
     }
-
-    sleep(Duration::from_secs(10));
-
-    conn.send_request(&x::DestroyWindow { window: window_id });
 }
 
-fn find_best_region(conn: &Connection, window_id: x::Window) -> Result<(Point, Rect), String> {
+fn deconstruct_parent(conn: &Connection, display_num: &i32) -> (Window, u32, u8) {
+    if let Some(root) = conn
+        .get_setup()
+        .roots()
+        .nth(display_num.unsigned_abs() as usize)
+    {
+        (root.root(), root.root_visual(), root.root_depth())
+    } else {
+        panic!("Unable to capture parent window data");
+    }
+}
+
+pub fn create_window(conn: &Connection, display_num: i32) -> Window {
+    let (parent_win, parent_vis, parent_depth) = deconstruct_parent(conn, &display_num);
+    let window_id: x::Window = conn.generate_id();
+
+    let our_window = x::CreateWindow {
+        depth: parent_depth,
+        wid: window_id,
+        parent: parent_win,
+        x: 0,
+        y: 0,
+        width: 1,
+        height: 1,
+        border_width: 0,
+        class: x::WindowClass::InputOutput,
+        visual: parent_vis,
+        value_list: &[
+            Cw::BackPixel(0x00555555),
+            Cw::EventMask(
+                EventMask::KEY_PRESS
+                    | EventMask::KEY_RELEASE
+                    | EventMask::BUTTON_PRESS
+                    | EventMask::BUTTON_RELEASE
+                    | EventMask::POINTER_MOTION,
+            ),
+        ],
+    };
+
+    conn.send_request_checked(&our_window);
+    conn.flush();
+
+    window_id
+}
+
+pub fn interrogate_randr(conn: &Connection, window_id: Window) -> (Point, Rect) {
     let monitor_cookie = conn.send_request(&xcb::randr::GetMonitors {
         window: window_id,
         get_active: true,
@@ -187,22 +175,87 @@ fn find_best_region(conn: &Connection, window_id: x::Window) -> Result<(Point, R
                     primary_monitor.x(),
                     primary_monitor.y()
                 );
-                Ok((
+                (
                     (primary_monitor.x() as i32, primary_monitor.y() as i32),
                     (
                         primary_monitor.width() as u32,
                         primary_monitor.height() as u32,
                     ),
-                ))
+                )
             } else {
-                Err(String::from("No monitor flagged as primary."))
+                panic!("No monitor flagged as primary.");
             }
         }
-        Err(msg) => Err(format!(
-            "Unable to retrieve monitor data for analysis: {:?}",
-            msg
-        )),
+        Err(msg) => {
+            panic!("Unable to retrieve monitor data for analysis: {:?}", msg);
+        }
     }
 }
 
-fn event_loop(conn: Connection, channel: std::sync::mpsc::Sender) {}
+pub fn event_loop(conn: Connection) {
+    loop {
+        match conn.wait_for_event() {
+            Ok(event) => {
+                debug!("Event received: {:?}", event)
+            }
+            Err(msg) => {
+                debug!("woops there it is: {:?}", msg);
+                break;
+            }
+        }
+    }
+}
+
+pub fn interrogate_keymaps(conn: &Connection) {
+    let list_device_req = ListInputDevices {};
+
+    let list_cookie = conn.send_request(&list_device_req);
+
+    let min_keycode = conn.get_setup().min_keycode();
+    let count = conn.get_setup().max_keycode() - min_keycode + 1;
+
+    let keycode_cookie = conn.send_request(&GetKeyboardMapping {
+        count,
+        first_keycode: min_keycode,
+    });
+
+    match conn.wait_for_reply(keycode_cookie) {
+        Ok(sym_list) => {
+            debug!("Keysyms per keycode: {}", sym_list.keysyms_per_keycode());
+            for index in 0..count {
+                let keycode = index + min_keycode;
+                let keysyms = sym_list.keysyms
+            }
+        }
+        Err(msg) => {
+            panic!("Unable to retrieve keycode->keysym conversion list");
+        }
+    }
+
+    match conn.wait_for_reply(list_cookie) {
+        Ok(devices) => {
+            debug!("List of captured devices: ");
+            for device in devices.devices() {
+                debug!("├ {:?}", device);
+                let prop_cookie = conn.send_request(&ListDeviceProperties {
+                    device_id: device.device_id(),
+                });
+                match conn.wait_for_reply(prop_cookie) {
+                    Ok(props) => {
+                        debug!("| ├ Properties for device {:?}", device.device_id());
+                        debug!("| ├ XiReplyType: {:?}", props.xi_reply_type());
+                        debug!("| └ Properties: {:?}", props.atoms());
+                        debug!("| ");
+                    }
+                    Err(msg) => {
+                        panic!("properties error: {:?}", msg);
+                    }
+                }
+                // GetDeviceInfo{device_spec: device.device_id, wanted: XiFeature::all(), all_buttons: true, };
+            }
+        }
+        Err(msg) => {
+            panic!("{:?}", msg)
+        }
+    }
+}
