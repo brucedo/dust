@@ -1,5 +1,6 @@
 use log::debug;
 
+mod input;
 mod setup;
 
 fn main() {

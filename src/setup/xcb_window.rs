@@ -1,19 +1,17 @@
 use core::panic;
-use std::{
-    thread::{self, sleep},
-    u32,
-};
+use std::u32;
 
 type Point = (i32, i32);
 type Rect = (u32, u32);
 
-use log::{debug, warn};
+use log::debug;
 use xcb::{
-    x::{self, Atom, ConfigWindow, Cw, EventMask, GetKeyboardMapping, MapWindow, Window},
-    xinput::{ListDeviceProperties, ListInputDevices},
-    xkb::{GetDeviceInfo, XiFeature},
-    Connection, Error, Extension,
+    x::{self, ConfigWindow, Cw, Event, EventMask, Keycode, MapWindow, Window},
+    xinput::KeyCode,
+    xkb::{GetDeviceInfo, UseExtension, XiFeature},
+    Connection, Extension,
 };
+use xkbcommon::xkb::{self, Keymap, Keysym};
 
 pub fn connect() -> (Connection, i32) {
     let ext = [
@@ -23,7 +21,7 @@ pub fn connect() -> (Connection, i32) {
         Extension::Xkb,
         Extension::Input,
     ];
-    match xcb::Connection::connect_with_extensions(None, &ext, &[]) {
+    let conn = match xcb::Connection::connect_with_extensions(None, &ext, &[]) {
         Ok((conn, screen_num)) => {
             debug!("Connected to screen number {}", screen_num);
             (conn, screen_num)
@@ -31,7 +29,23 @@ pub fn connect() -> (Connection, i32) {
         Err(_) => {
             panic!("Connection attempt failed.  oooh noeeees");
         }
+    };
+
+    let xkb_cookie = conn.0.send_request(&UseExtension {
+        wanted_major: xkb::x11::MIN_MAJOR_XKB_VERSION,
+        wanted_minor: xkb::x11::MIN_MINOR_XKB_VERSION,
+    });
+
+    match conn.0.wait_for_reply(xkb_cookie) {
+        Ok(xkb_support) => {
+            debug!("XKB supported? {}", xkb_support.supported());
+        }
+        Err(msg) => {
+            panic!("XKB not supported: {}", msg);
+        }
     }
+
+    conn
 }
 
 pub fn extension_data(conn: &Connection) {
@@ -193,10 +207,30 @@ pub fn interrogate_randr(conn: &Connection, window_id: Window) -> (Point, Rect) 
 }
 
 pub fn event_loop(conn: Connection) {
+    let keymap = interrogate_keymaps(&conn);
+    let state = xkb::State::new(&keymap);
     loop {
         match conn.wait_for_event() {
             Ok(event) => {
-                debug!("Event received: {:?}", event)
+                match event {
+                    xcb::Event::X(Event::KeyPress(key)) => {
+                        debug!(
+                            "Single key: {:?}",
+                            state.key_get_one_sym(xkb::Keycode::new(key.detail() as u32))
+                        );
+                        match keymap.key_get_name(xkb::Keycode::new(key.detail() as u32)) {
+                            Some(sym) => {
+                                debug!("Key pressed: {}", sym);
+                            }
+                            None => {
+                                debug!("Key pressed with no corresponding symbol name in the map.");
+                            }
+                        }
+                    }
+                    _ => {
+                        debug!("Event received: {:?}", event);
+                    }
+                };
             }
             Err(msg) => {
                 debug!("woops there it is: {:?}", msg);
@@ -206,56 +240,44 @@ pub fn event_loop(conn: Connection) {
     }
 }
 
-pub fn interrogate_keymaps(conn: &Connection) {
-    let list_device_req = ListInputDevices {};
+pub fn interrogate_keymaps(conn: &Connection) -> Keymap {
+    let xkb_ctxt = xkb::Context::new(xkb::CONTEXT_NO_FLAGS);
 
-    let list_cookie = conn.send_request(&list_device_req);
+    let core_kb_id = xkb::x11::get_core_keyboard_device_id(conn);
 
-    let min_keycode = conn.get_setup().min_keycode();
-    let count = conn.get_setup().max_keycode() - min_keycode + 1;
+    debug!("core keyboard id: {}", core_kb_id);
 
-    let keycode_cookie = conn.send_request(&GetKeyboardMapping {
-        count,
-        first_keycode: min_keycode,
-    });
+    xkb::x11::keymap_new_from_device(&xkb_ctxt, conn, 3, xkb::KEYMAP_COMPILE_NO_FLAGS)
 
-    match conn.wait_for_reply(keycode_cookie) {
-        Ok(sym_list) => {
-            debug!("Keysyms per keycode: {}", sym_list.keysyms_per_keycode());
-            for index in 0..count {
-                let keycode = index + min_keycode;
-                let keysyms = sym_list.keysyms
-            }
-        }
-        Err(msg) => {
-            panic!("Unable to retrieve keycode->keysym conversion list");
-        }
-    }
-
-    match conn.wait_for_reply(list_cookie) {
-        Ok(devices) => {
-            debug!("List of captured devices: ");
-            for device in devices.devices() {
-                debug!("├ {:?}", device);
-                let prop_cookie = conn.send_request(&ListDeviceProperties {
-                    device_id: device.device_id(),
-                });
-                match conn.wait_for_reply(prop_cookie) {
-                    Ok(props) => {
-                        debug!("| ├ Properties for device {:?}", device.device_id());
-                        debug!("| ├ XiReplyType: {:?}", props.xi_reply_type());
-                        debug!("| └ Properties: {:?}", props.atoms());
-                        debug!("| ");
-                    }
-                    Err(msg) => {
-                        panic!("properties error: {:?}", msg);
-                    }
-                }
-                // GetDeviceInfo{device_spec: device.device_id, wanted: XiFeature::all(), all_buttons: true, };
-            }
-        }
-        Err(msg) => {
-            panic!("{:?}", msg)
-        }
-    }
+    // let min_keycode = conn.get_setup().min_keycode();
+    // let count = conn.get_setup().max_keycode() - min_keycode + 1;
+    //
+    // let keycode_cookie = conn.send_request(&GetKeyboardMapping {
+    //     count,
+    //     first_keycode: min_keycode,
+    // });
+    //
+    // match conn.wait_for_reply(keycode_cookie) {
+    //     Ok(sym_list) => {
+    //         let keysyms = sym_list.keysyms();
+    //         debug!("Keysyms per keycode: {}", sym_list.keysyms_per_keycode());
+    //         debug!("Length of keysyms: {}", keysyms.len());
+    //         for index in 0..count {
+    //             let keycode = index + min_keycode;
+    //             debug!("Keycode: {}", keycode);
+    //             let sym_slice: &[u32] =
+    //                 &keysyms[((index as usize) * 7)..=((index as usize) * 7 + 6)];
+    //             for sym_set in sym_slice {
+    //                 debug!("├ {:#034b}", sym_set);
+    //             }
+    //         }
+    //     }
+    //     Err(msg) => {
+    //         panic!("Unable to retrieve keycode->keysym conversion list");
+    //     }
+    // }
 }
+
+// def translate_keysym(symbol: u32) =>  {
+//
+// }
