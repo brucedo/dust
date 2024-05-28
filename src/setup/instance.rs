@@ -1,8 +1,11 @@
-use ash::vk::{ApplicationInfo, InstanceCreateInfo};
-use ash::Entry;
+use ash::vk::{ApplicationInfo, InstanceCreateInfo, SurfaceKHR, XcbSurfaceCreateInfoKHR};
+use ash::{Entry, Instance};
 use core::panic;
 use log::debug;
-use std::ffi::{CStr, CString};
+use std::ffi::{c_void, CStr, CString};
+use xcb::ffi::xcb_connection_t;
+use xcb::x::Window;
+use xcb::Xid;
 
 pub fn init() -> ash::Entry {
     debug!("Starting initialization");
@@ -20,19 +23,6 @@ pub fn instance(entry: &ash::Entry) -> ash::Instance {
         thread::{self, sleep},
         time::Duration,
     };
-
-    use crate::setup::xcb_window;
-
-    debug!("Starting X-Windows initialization...");
-    let (conn, screen_num) = xcb_window::connect();
-    xcb_window::interrogate_keymaps(&conn);
-    xcb_window::extension_data(&conn);
-    let window = xcb_window::create_window(&conn, screen_num);
-    let (upper_left, window_size) = xcb_window::interrogate_randr(&conn, window);
-    xcb_window::resize_window(&conn, window, upper_left, window_size);
-
-    let _xcb_ptr = conn.get_raw_conn();
-    thread::spawn(move || xcb_window::event_loop(conn));
 
     sleep(Duration::from_secs(10));
 
@@ -66,6 +56,10 @@ pub fn instance(entry: &ash::Entry) -> ash::Instance {
     }
 }
 
+pub fn xcb_surface_instance(entry: &Entry, instance: &Instance) -> ash::khr::xcb_surface::Instance {
+    ash::khr::xcb_surface::Instance::new(entry, instance)
+}
+
 #[cfg(all(target_os = "windows", not(target_os = "linux")))]
 pub fn instance() {
     let app_info = app_info(CString::new("Dust for Windows").unwrap().as_c_str());
@@ -84,6 +78,24 @@ fn app_info(app_name: &CStr) -> ApplicationInfo {
         .api_version(ash::vk::make_api_version(0, 1, 3, 0))
         .engine_name(app_name)
         .engine_version(1)
+}
+
+pub fn xcb_surface(
+    instance: &ash::khr::xcb_surface::Instance,
+    xcb_ptr: *mut xcb_connection_t,
+    xcb_window: &Window,
+) -> SurfaceKHR {
+    let xcb_void: *mut std::ffi::c_void = xcb_ptr as *mut c_void;
+    let surface_info_struct = XcbSurfaceCreateInfoKHR::default()
+        .window(xcb_window.resource_id())
+        .connection(xcb_void);
+
+    match unsafe { instance.create_xcb_surface(&surface_info_struct, None) } {
+        Ok(surface) => surface,
+        Err(msg) => {
+            panic!("Surface creation (predictably) failed: {:?}", msg)
+        }
+    }
 }
 
 fn scan(vk_entry: &Entry) {

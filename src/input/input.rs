@@ -1,3 +1,8 @@
+pub enum KeyStroke {
+    Key(u32),
+    ToggleKey(u32),
+}
+
 pub enum Symbol {
     PrintableSymbol(PrintableSymbols),
     UnprintableSymbol(UnprintableSymbols),

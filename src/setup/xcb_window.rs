@@ -1,5 +1,6 @@
 use core::panic;
-use std::u32;
+use std::sync::mpsc::SyncSender;
+use std::{time::Duration, u32};
 
 type Point = (i32, i32);
 type Rect = (u32, u32);
@@ -12,6 +13,8 @@ use xcb::{
     Connection, Extension,
 };
 use xkbcommon::xkb::{self, Keymap, Keysym};
+
+use crate::input::input::KeyStroke;
 
 pub fn connect() -> (Connection, i32) {
     let ext = [
@@ -115,6 +118,39 @@ pub fn resize_window(conn: &Connection, window_id: Window, upper_left: Point, di
             debug!("Flush failed?  {:?}", msg)
         }
     }
+
+    let confirm_change = x::GetGeometry {
+        drawable: x::Drawable::Window(window_id),
+    };
+
+    loop {
+        let cookie = conn.send_request(&confirm_change);
+
+        match conn.wait_for_reply(cookie) {
+            Ok(geom_reply) => {
+                let (x, y, width, height) = (
+                    geom_reply.x(),
+                    geom_reply.y(),
+                    geom_reply.width(),
+                    geom_reply.height(),
+                );
+                if x as i32 == upper_left.0
+                    && y as i32 == upper_left.1
+                    && width as u32 == dim.0
+                    && height as u32 == dim.1
+                {
+                    break;
+                } else {
+                    std::thread::sleep(Duration::from_millis(500));
+                }
+            }
+            Err(msg) => {
+                panic!("Trying to check the update status of the geometry failed.")
+            }
+        }
+    }
+
+    debug!("Window resized.");
 }
 
 fn deconstruct_parent(conn: &Connection, display_num: &i32) -> (Window, u32, u8) {
@@ -206,7 +242,7 @@ pub fn interrogate_randr(conn: &Connection, window_id: Window) -> (Point, Rect) 
     }
 }
 
-pub fn event_loop(conn: Connection) {
+pub fn event_loop(conn: Connection, sender: SyncSender<KeyStroke>) {
     let keymap = interrogate_keymaps(&conn);
     let state = xkb::State::new(&keymap);
     loop {
