@@ -1,4 +1,7 @@
-use ash::vk::{ApplicationInfo, InstanceCreateInfo, SurfaceKHR, XcbSurfaceCreateInfoKHR};
+use ash::vk::{
+    ApplicationInfo, InstanceCreateInfo, PhysicalDeviceProperties, SurfaceKHR,
+    XcbSurfaceCreateInfoKHR,
+};
 use ash::{Entry, Instance};
 use core::panic;
 use log::debug;
@@ -95,6 +98,69 @@ pub fn xcb_surface(
         Err(msg) => {
             panic!("Surface creation (predictably) failed: {:?}", msg)
         }
+    }
+}
+
+pub fn enumerate_physical_devs(instance: &Instance) {
+    let physical_props = if let Ok(enumerable) = unsafe { instance.enumerate_physical_devices() } {
+        let physical_props: Vec<PhysicalDeviceProperties> = enumerable
+            .iter()
+            .map(|pd| unsafe { instance.get_physical_device_properties(*pd) })
+            .collect();
+        physical_props
+    } else {
+        panic!("Unable to retrieve the physical devices associated with this instance.");
+    };
+
+    for device in physical_props {
+        match device.device_name_as_c_str() {
+            Ok(device_name_cstr) => match device_name_cstr.to_str() {
+                Ok(device_name_utf8) => {
+                    debug!("Device name: {}", device_name_utf8);
+                }
+                Err(_) => {
+                    debug!("Device name: Unknown");
+                }
+            },
+            Err(_) => {
+                debug!("Device name: Unknown");
+            }
+        }
+        debug!("┣━ Device ID:                    {}", device.device_id);
+        debug!("┣━ Vendor ID:                    {}", device.vendor_id);
+        debug!("┣━ Device Type:                  {:?}", device.device_type);
+        debug!(
+            "┣━ Framebuffer height:              {}",
+            device.limits.max_framebuffer_width,
+        );
+        debug!(
+            "┣━ Framebuffer width:               {}",
+            device.limits.max_framebuffer_height,
+        );
+        debug!(
+            "┣━ Max memory alloc count:          {}",
+            device.limits.max_memory_allocation_count,
+        );
+        debug!(
+            "┣━ Max vertex input attrs:          {}",
+            device.limits.max_vertex_input_attributes,
+        );
+        debug!(
+            "┣━ Max viewports:                   {}",
+            device.limits.max_viewports,
+        );
+        debug!(
+            "┣━ Max viewport dims:               {}x{}",
+            device.limits.max_viewport_dimensions[0], device.limits.max_viewport_dimensions[1],
+        );
+        debug!(
+            "┣━ Framebuffer color sample counts: {:?} ",
+            device.limits.framebuffer_color_sample_counts
+        );
+        debug!(
+            "┗━ Framebuffer depth sample counts: {:?} ",
+            device.limits.framebuffer_depth_sample_counts
+        )
     }
 }
 

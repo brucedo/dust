@@ -27,6 +27,7 @@ fn main() {
 
     let entry = setup::instance::init();
     let instance = setup::instance::instance(&entry);
+    setup::instance::enumerate_physical_devs(&instance);
     let surface_instance = setup::instance::xcb_surface_instance(&entry, &instance);
     let _vk_surface = setup::instance::xcb_surface(&surface_instance, _xcb_ptr, &window);
 
@@ -34,6 +35,8 @@ fn main() {
 
     // let instance = unsafe { vk_entry.create_instance(&instance_info_bldr, allocation_callbacks) };
 
+    let surface_instance = ash::khr::surface::Instance::new(&entry, &instance);
+    unsafe { surface_instance.destroy_surface(_vk_surface, None) };
     unsafe { instance.destroy_instance(None) };
 
     debug!("Vulkan instance destroyed...");
