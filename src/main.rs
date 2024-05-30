@@ -27,9 +27,21 @@ fn main() {
 
     let entry = setup::instance::init();
     let instance = setup::instance::instance(&entry);
-    setup::instance::enumerate_physical_devs(&instance);
+    let best_dev = setup::instance::enumerate_physical_devs(&instance);
     let surface_instance = setup::instance::xcb_surface_instance(&entry, &instance);
+    let khr_surface_instance = setup::instance::khr_surface_instance(&entry, &instance);
     let _vk_surface = setup::instance::xcb_surface(&surface_instance, _xcb_ptr, &window);
+    let caps = setup::instance::map_physical_device_to_surface_properties(
+        &khr_surface_instance,
+        &best_dev,
+        &_vk_surface,
+    );
+
+    debug!(
+        "Extents? {}x{}",
+        caps.current_extent.width, caps.current_extent.height
+    );
+    debug!("Buffers? {}-{}", caps.min_image_count, caps.max_image_count);
 
     debug!("The...instance was created?");
 

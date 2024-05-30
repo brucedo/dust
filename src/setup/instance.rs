@@ -1,11 +1,12 @@
 use ash::vk::{
-    ApplicationInfo, InstanceCreateInfo, PhysicalDeviceProperties, SurfaceKHR,
-    XcbSurfaceCreateInfoKHR,
+    ApplicationInfo, InstanceCreateInfo, PhysicalDevice, PhysicalDeviceProperties,
+    PhysicalDeviceType, SurfaceCapabilitiesKHR, SurfaceKHR, XcbSurfaceCreateInfoKHR,
 };
 use ash::{Entry, Instance};
 use core::panic;
-use log::debug;
+use log::{debug, warn};
 use std::ffi::{c_void, CStr, CString};
+use std::ops::Deref;
 use xcb::ffi::xcb_connection_t;
 use xcb::x::Window;
 use xcb::Xid;
@@ -63,6 +64,10 @@ pub fn xcb_surface_instance(entry: &Entry, instance: &Instance) -> ash::khr::xcb
     ash::khr::xcb_surface::Instance::new(entry, instance)
 }
 
+pub fn khr_surface_instance(entry: &Entry, instance: &Instance) -> ash::khr::surface::Instance {
+    ash::khr::surface::Instance::new(entry, instance)
+}
+
 #[cfg(all(target_os = "windows", not(target_os = "linux")))]
 pub fn instance() {
     let app_info = app_info(CString::new("Dust for Windows").unwrap().as_c_str());
@@ -101,67 +106,85 @@ pub fn xcb_surface(
     }
 }
 
-pub fn enumerate_physical_devs(instance: &Instance) {
-    let physical_props = if let Ok(enumerable) = unsafe { instance.enumerate_physical_devices() } {
-        let physical_props: Vec<PhysicalDeviceProperties> = enumerable
-            .iter()
-            .map(|pd| unsafe { instance.get_physical_device_properties(*pd) })
-            .collect();
-        physical_props
-    } else {
-        panic!("Unable to retrieve the physical devices associated with this instance.");
+pub fn enumerate_physical_devs(instance: &Instance) -> PhysicalDevice {
+    let mut p_devs: Vec<PhysicalDevice> =
+        if let Ok(enumerable) = unsafe { instance.enumerate_physical_devices() } {
+            enumerable
+        } else {
+            panic!("Unable to retrieve the physical devices associated with this instance.");
+        };
+
+    if p_devs.is_empty() {
+        panic!("There are no detected Vulkan compatible physical devices: cannot proceed.");
+    }
+
+    let mut best_pd: PhysicalDevice = p_devs.pop().unwrap();
+    let pd_props = unsafe { instance.get_physical_device_properties(best_pd) };
+    let mut best_score = shitty_score_physical_device_properties(&pd_props);
+    while let Some(temp) = p_devs.pop() {
+        let pd_props = unsafe { instance.get_physical_device_properties(temp) };
+        let score = shitty_score_physical_device_properties(&pd_props);
+        if score > best_score {
+            best_score = score;
+            best_pd = temp;
+            debug!(
+                "Swapping in device {} as best device",
+                pd_props.device_name_as_c_str().unwrap().to_str().unwrap()
+            )
+        }
+    }
+
+    best_pd
+}
+
+pub fn map_physical_device_to_surface_properties(
+    instance: &ash::khr::surface::Instance,
+    device: &PhysicalDevice,
+    surface: &SurfaceKHR,
+) -> SurfaceCapabilitiesKHR {
+    match unsafe { instance.get_physical_device_surface_capabilities(*device, *surface) } {
+        Ok(surface_props) => surface_props,
+        Err(msg) => {
+            panic!(
+                "Unable to get the physical device-surface capabilities: {}",
+                msg
+            );
+        }
+    }
+}
+
+fn shitty_score_physical_device_properties(device_props: &PhysicalDeviceProperties) -> usize {
+    let mut score = 1;
+
+    match device_props.device_type {
+        PhysicalDeviceType::DISCRETE_GPU => {
+            score *= 10;
+        }
+        PhysicalDeviceType::INTEGRATED_GPU => {
+            score *= 5;
+        }
+        PhysicalDeviceType::CPU => {
+            score *= 1;
+        }
+        _ => score *= 0,
     };
 
-    for device in physical_props {
-        match device.device_name_as_c_str() {
-            Ok(device_name_cstr) => match device_name_cstr.to_str() {
-                Ok(device_name_utf8) => {
-                    debug!("Device name: {}", device_name_utf8);
-                }
-                Err(_) => {
-                    debug!("Device name: Unknown");
-                }
-            },
-            Err(_) => {
-                debug!("Device name: Unknown");
-            }
+    match device_props.vendor_id {
+        0x1002 | 0x1022 => {
+            score += 5;
         }
-        debug!("┣━ Device ID:                    {}", device.device_id);
-        debug!("┣━ Vendor ID:                    {}", device.vendor_id);
-        debug!("┣━ Device Type:                  {:?}", device.device_type);
-        debug!(
-            "┣━ Framebuffer height:              {}",
-            device.limits.max_framebuffer_width,
-        );
-        debug!(
-            "┣━ Framebuffer width:               {}",
-            device.limits.max_framebuffer_height,
-        );
-        debug!(
-            "┣━ Max memory alloc count:          {}",
-            device.limits.max_memory_allocation_count,
-        );
-        debug!(
-            "┣━ Max vertex input attrs:          {}",
-            device.limits.max_vertex_input_attributes,
-        );
-        debug!(
-            "┣━ Max viewports:                   {}",
-            device.limits.max_viewports,
-        );
-        debug!(
-            "┣━ Max viewport dims:               {}x{}",
-            device.limits.max_viewport_dimensions[0], device.limits.max_viewport_dimensions[1],
-        );
-        debug!(
-            "┣━ Framebuffer color sample counts: {:?} ",
-            device.limits.framebuffer_color_sample_counts
-        );
-        debug!(
-            "┗━ Framebuffer depth sample counts: {:?} ",
-            device.limits.framebuffer_depth_sample_counts
-        )
+        0x10de => {
+            score += 3;
+        }
+        0x8086 => {
+            score += 2;
+        }
+        _ => {
+            score += 1;
+        }
     }
+
+    score
 }
 
 fn scan(vk_entry: &Entry) {
