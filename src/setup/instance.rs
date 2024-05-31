@@ -137,22 +137,6 @@ pub fn enumerate_physical_devs(instance: &Instance) -> PhysicalDevice {
     best_pd
 }
 
-pub fn map_physical_device_to_surface_properties(
-    instance: &ash::khr::surface::Instance,
-    device: &PhysicalDevice,
-    surface: &SurfaceKHR,
-) -> SurfaceCapabilitiesKHR {
-    match unsafe { instance.get_physical_device_surface_capabilities(*device, *surface) } {
-        Ok(surface_props) => surface_props,
-        Err(msg) => {
-            panic!(
-                "Unable to get the physical device-surface capabilities: {}",
-                msg
-            );
-        }
-    }
-}
-
 fn shitty_score_physical_device_properties(device_props: &PhysicalDeviceProperties) -> usize {
     let mut score = 1;
 
@@ -185,6 +169,33 @@ fn shitty_score_physical_device_properties(device_props: &PhysicalDeviceProperti
     }
 
     score
+}
+
+pub fn map_physical_device_to_surface_properties(
+    instance: &ash::khr::surface::Instance,
+    device: &PhysicalDevice,
+    surface: &SurfaceKHR,
+) -> SurfaceCapabilitiesKHR {
+    match unsafe { instance.get_physical_device_surface_capabilities(*device, *surface) } {
+        Ok(surface_props) => surface_props,
+        Err(msg) => {
+            panic!(
+                "Unable to get the physical device-surface capabilities: {}",
+                msg
+            );
+        }
+    }
+}
+
+pub fn query_physical_device_queues(device: &PhysicalDevice, instance: &Instance) {
+    let queue_families = unsafe { instance.get_physical_device_queue_family_properties(*device) };
+
+    for (index, family) in queue_families.iter().enumerate() {
+        debug!(
+            "Testing queue {}.  Properties/count: {:?}/{}",
+            index, family.queue_flags, family.queue_count
+        );
+    }
 }
 
 fn scan(vk_entry: &Entry) {

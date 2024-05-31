@@ -28,6 +28,7 @@ fn main() {
     let entry = setup::instance::init();
     let instance = setup::instance::instance(&entry);
     let best_dev = setup::instance::enumerate_physical_devs(&instance);
+    setup::instance::query_physical_device_queues(&best_dev, &instance);
     let surface_instance = setup::instance::xcb_surface_instance(&entry, &instance);
     let khr_surface_instance = setup::instance::khr_surface_instance(&entry, &instance);
     let _vk_surface = setup::instance::xcb_surface(&surface_instance, _xcb_ptr, &window);
