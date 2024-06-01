@@ -1,15 +1,19 @@
 use ash::vk::{
-    ApplicationInfo, InstanceCreateInfo, PhysicalDevice, PhysicalDeviceProperties,
-    PhysicalDeviceType, SurfaceCapabilitiesKHR, SurfaceKHR, XcbSurfaceCreateInfoKHR,
+    ApplicationInfo, DeviceCreateInfo, DeviceQueueCreateInfo, InstanceCreateInfo, PhysicalDevice,
+    PhysicalDeviceFeatures, PhysicalDeviceProperties, PhysicalDeviceType, QueueFamilyProperties,
+    QueueFlags, SurfaceCapabilitiesKHR, SurfaceKHR, XcbSurfaceCreateInfoKHR,
 };
-use ash::{Entry, Instance};
+use ash::{Device, Entry, Instance};
 use core::panic;
-use log::{debug, warn};
+use log::{debug, error, warn};
 use std::ffi::{c_void, CStr, CString};
 use std::ops::Deref;
 use xcb::ffi::xcb_connection_t;
 use xcb::x::Window;
 use xcb::Xid;
+
+type Index = usize;
+type Count = u32;
 
 pub fn init() -> ash::Entry {
     debug!("Starting initialization");
@@ -187,7 +191,122 @@ pub fn map_physical_device_to_surface_properties(
     }
 }
 
-pub fn query_physical_device_queues(device: &PhysicalDevice, instance: &Instance) {
+pub fn find_extensions_supported_by_pdev(
+    instance: &Instance,
+    p_dev: PhysicalDevice,
+) -> Vec<String> {
+    let mut extension_list = Vec::new();
+    match unsafe { instance.enumerate_device_extension_properties(p_dev) } {
+        Ok(props) => {
+            debug!("Supported layers for physical device: ");
+            for prop in props {
+                let extension_name = unsafe { CStr::from_ptr(prop.extension_name.as_ptr()) };
+                match extension_name.to_str() {
+                    Ok(extension_name_str) => {
+                        if is_wanted_extension(extension_name_str) {
+                            extension_list.push(extension_name_str.to_string())
+                        }
+                        debug!("\t{}", extension_name_str);
+                    }
+                    Err(_) => {
+                        debug!("\tUnconvertable extension name.");
+                    }
+                }
+            }
+        }
+        Err(msg) => {
+            error!("enumerate_device_extension_properties emitted an error when used with the selected physical device: {:?}", msg);
+        }
+    }
+
+    extension_list
+}
+
+fn is_wanted_extension(ext_name: &str) -> bool {
+    match ext_name {
+        "VK_KHR_swapchain" => true,
+        _ => false,
+    }
+}
+
+pub fn make_logical_device(
+    instance: Instance,
+    p_dev: PhysicalDevice,
+    exts: Vec<String>,
+    queue_selection: Vec<DeviceQueueCreateInfo>,
+) -> Device {
+    let mut create_info = DeviceCreateInfo::default();
+    create_info.queue_create_infos(queue_selection.as_slice());
+    create_info.enabled_features(&setup_physical_features());
+
+    exts.iter()
+        .map(|ext_string| ext_string.as_str())
+        .map(|bytes| CString::)
+    ;
+
+    match unsafe { instance.create_device(p_dev, &create_info, None) } {
+        Ok(device) => device,
+        Err(msg) => {
+            panic!(
+                "Could not construct logical device for physical device and options: {:?}",
+                msg
+            )
+        }
+    }
+}
+
+pub fn setup_physical_features() -> PhysicalDeviceFeatures {
+    PhysicalDeviceFeatures::default()
+        .robust_buffer_access(true)
+        .full_draw_index_uint32(true)
+        .image_cube_array(true)
+        .independent_blend(true)
+        .geometry_shader(true)
+        .tessellation_shader(true)
+        .sample_rate_shading(true)
+        .dual_src_blend(true)
+        .logic_op(true)
+        .multi_draw_indirect(true)
+        .draw_indirect_first_instance(true)
+        .depth_clamp(true)
+        .depth_bias_clamp(true)
+        .fill_mode_non_solid(true)
+        .depth_bounds(true)
+        .wide_lines(true)
+        .large_points(true)
+        .alpha_to_one(true)
+        .multi_viewport(true)
+        .sampler_anisotropy(true)
+        .texture_compression_etc2(true)
+        .texture_compression_astc_ldr(true)
+        .occlusion_query_precise(true)
+        .pipeline_statistics_query(true)
+        .vertex_pipeline_stores_and_atomics(true)
+        .fragment_stores_and_atomics(true)
+        .shader_tessellation_and_geometry_point_size(true)
+        .shader_image_gather_extended(true)
+        .shader_storage_image_extended_formats(true)
+        .shader_storage_image_multisample(true)
+        .shader_storage_image_read_without_format(true)
+        .shader_storage_image_read_without_format(true)
+        .shader_uniform_buffer_array_dynamic_indexing(true)
+        .shader_sampled_image_array_dynamic_indexing(true)
+        .shader_storage_buffer_array_dynamic_indexing(true)
+        .shader_storage_image_array_dynamic_indexing(true)
+        .shader_clip_distance(true)
+        .shader_cull_distance(true)
+        .shader_float64(true)
+        .shader_int64(true)
+        .shader_int16(true)
+        .shader_resource_residency(true)
+        .shader_resource_min_lod(true)
+}
+
+pub fn select_physical_device_queues<'a>(
+    device: &'a PhysicalDevice,
+    instance: &'a Instance,
+) -> Vec<DeviceQueueCreateInfo<'a>> {
+    let mut queue_selection = Vec::new();
     let queue_families = unsafe { instance.get_physical_device_queue_family_properties(*device) };
 
     for (index, family) in queue_families.iter().enumerate() {
@@ -195,7 +314,19 @@ pub fn query_physical_device_queues(device: &PhysicalDevice, instance: &Instance
             "Testing queue {}.  Properties/count: {:?}/{}",
             index, family.queue_flags, family.queue_count
         );
+        if family.queue_flags == QueueFlags::TRANSFER | QueueFlags::COMPUTE | QueueFlags::GRAPHICS {
+            debug!("Found matching queue.");
+            let queue_count = u32::min(family.queue_count, 3);
+            debug!("Requesting {} queues.", queue_count);
+            let mut queue_create_info =
+                DeviceQueueCreateInfo::default().queue_family_index(index as u32);
+            queue_create_info.queue_count = queue_count;
+            queue_create_info.queue_priorities(vec![0.5; queue_count as usize].as_slice());
+
+            queue_selection.push(queue_create_info);
+        }
     }
+    queue_selection
 }
 
 fn scan(vk_entry: &Entry) {
