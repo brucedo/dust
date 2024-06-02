@@ -32,6 +32,8 @@ fn main() {
     debug!("Physical extensions: ");
     physical_exts.iter().for_each(|ext| debug!("\t{}", ext));
     let device_queues = setup::instance::select_physical_device_queues(&best_dev, &instance);
+    let logical_device =
+        setup::instance::make_logical_device(&instance, best_dev, physical_exts, device_queues);
     let surface_instance = setup::instance::xcb_surface_instance(&entry, &instance);
     let khr_surface_instance = setup::instance::khr_surface_instance(&entry, &instance);
     let _vk_surface = setup::instance::xcb_surface(&surface_instance, _xcb_ptr, &window);

@@ -6,11 +6,14 @@ use ash::vk::{
 use ash::{Device, Entry, Instance};
 use core::panic;
 use log::{debug, error, warn};
+use std::borrow::Borrow;
 use std::ffi::{c_void, CStr, CString};
 use std::ops::Deref;
 use xcb::ffi::xcb_connection_t;
 use xcb::x::Window;
 use xcb::Xid;
+
+use crate::setup::xcb_keymapper::new;
 
 type Index = usize;
 type Count = u32;
@@ -32,7 +35,7 @@ pub fn instance(entry: &ash::Entry) -> ash::Instance {
         time::Duration,
     };
 
-    sleep(Duration::from_secs(10));
+    // sleep(Duration::from_secs(10));
 
     debug!("Starting instance creation...");
     let app_name = CString::new("Dust for Linux").unwrap();
@@ -230,19 +233,69 @@ fn is_wanted_extension(ext_name: &str) -> bool {
 }
 
 pub fn make_logical_device(
-    instance: Instance,
+    instance: &Instance,
     p_dev: PhysicalDevice,
     exts: Vec<String>,
     queue_selection: Vec<DeviceQueueCreateInfo>,
 ) -> Device {
-    let mut create_info = DeviceCreateInfo::default();
-    create_info.queue_create_infos(queue_selection.as_slice());
-    create_info.enabled_features(&setup_physical_features());
+    let mut exts_vec: Vec<*const i8> = Vec::new();
+    // exts
+    //     .iter()
+    //     .map(|ext_string| ext_string.as_str())
+    //     .map(CString::new)
+    //     .filter(Result::is_ok)
+    //     .map(Result::unwrap)
+    //     .map(CString::into_boxed_c_str)
+    //     .map(|boxed_c_str| boxed_c_str.as_ptr())
+    //     .collect();
 
-    exts.iter()
-        .map(|ext_string| ext_string.as_str())
-        .map(|bytes| CString::)
-    ;
+    for ext in exts {
+        debug!("Processing input string {}", ext);
+        let ext_str: &str = ext.as_str();
+        debug!("Str: {}: ", ext_str);
+        let ext_cstring: CString = CString::new(ext_str).unwrap();
+        debug!("CString: {:?}", ext_cstring);
+
+        let ext_boxed = ext_cstring.into_boxed_c_str();
+        // let ext_cstr: &CStr = ext_cstring.as_c_str();
+        debug!("Boxed cstring: {:?}", ext_boxed);
+        // debug!("unboxed cstr: {:?}", ext_cstr);
+        let ext_ptr: *const i8 = ext_boxed.as_ptr();
+        // let ext_ptr = ext_cstr.as_ptr();
+
+        debug!("deref'd cstr: {:?}", unsafe { *ext_ptr });
+        debug!("deref'd cstr + 1 {:?}", unsafe { *ext_ptr.offset(1) });
+
+        exts_vec.push(ext_ptr);
+        debug!("Extension 0 (in loop) {:?}", *(exts_vec.get(0).unwrap()));
+        let post_push_ptr: &*const i8 = exts_vec.get(0).unwrap();
+        debug!("deref'd cstr post-push: {:?}", unsafe { **post_push_ptr });
+    }
+
+    let post_push_ptr: &*const i8 = exts_vec.get(0).unwrap();
+    debug!("deref'd cstr post-scope: {:?}", unsafe { **post_push_ptr });
+    debug!("{} extensions being requested", exts_vec.len());
+    // debug!("Extension 0 {:?}", unsafe { **(exts_vec.get(0).unwrap()) });
+    unsafe {
+        let mut temp_vec = exts_vec.clone();
+        let temp = temp_vec.pop().unwrap();
+        let mut count = 0;
+
+        while *temp.offset(count) != 0 {
+            debug!("Offset {}, value {:#4x}", count, *temp.offset(count));
+            count += 1;
+        }
+    }
+    let physical_features = setup_physical_features();
+
+    let khr_swapchain_name = CString::new("VK_KHR_swapchain").unwrap();
+    let exts_arr = [khr_swapchain_name.as_c_str().as_ptr()];
+
+    let mut create_info = DeviceCreateInfo::default()
+        .queue_create_infos(queue_selection.as_slice())
+        .enabled_features(&physical_features)
+        .enabled_extension_names(&exts_arr);
+    // .enabled_extension_names(exts_vec.as_slice());
 
     match unsafe { instance.create_device(p_dev, &create_info, None) } {
         Ok(device) => device,
