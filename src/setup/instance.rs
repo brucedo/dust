@@ -1,7 +1,8 @@
 use ash::vk::{
-    ApplicationInfo, DeviceCreateInfo, DeviceQueueCreateInfo, InstanceCreateInfo, PhysicalDevice,
-    PhysicalDeviceFeatures, PhysicalDeviceProperties, PhysicalDeviceType, QueueFamilyProperties,
-    QueueFlags, SurfaceCapabilitiesKHR, SurfaceKHR, XcbSurfaceCreateInfoKHR,
+    ApplicationInfo, DeviceCreateInfo, DeviceQueueCreateInfo, Format, InstanceCreateInfo,
+    PhysicalDevice, PhysicalDeviceFeatures, PhysicalDeviceProperties, PhysicalDeviceType,
+    QueueFamilyProperties, QueueFlags, SurfaceCapabilitiesKHR, SurfaceKHR, SwapchainCreateFlagsKHR,
+    SwapchainCreateInfoKHR, SwapchainKHR, XcbSurfaceCreateInfoKHR,
 };
 use ash::{Device, Entry, Instance};
 use core::panic;
@@ -238,64 +239,32 @@ pub fn make_logical_device(
     exts: Vec<String>,
     queue_selection: Vec<DeviceQueueCreateInfo>,
 ) -> Device {
-    let mut exts_vec: Vec<*const i8> = Vec::new();
-    // exts
-    //     .iter()
-    //     .map(|ext_string| ext_string.as_str())
-    //     .map(CString::new)
-    //     .filter(Result::is_ok)
-    //     .map(Result::unwrap)
-    //     .map(CString::into_boxed_c_str)
-    //     .map(|boxed_c_str| boxed_c_str.as_ptr())
-    //     .collect();
+    // This initial copy operation is required to give the CStrings a long-lived
+    // place to stay.  Previous tries resulted in garbage being captured for the
+    // extension names, because the CStrings are being allocated on the heap, then
+    // dropped at the end of an arbitrary scope (either as a result of a closure or
+    // because of the end of a loop scope, etc).  This meant that the raw pointers
+    // we are capturing to give to Vulkan are up for grabs and are being reused
+    // almost immediately - leading to the destruction of the text data.
+    let mut cstr_temp_exts: Vec<CString> = exts
+        .iter()
+        .map(|ext| CString::new(ext.as_str()))
+        .filter(Result::is_ok)
+        .map(Result::unwrap)
+        .collect();
+    let exts_arr: Vec<*const i8> = cstr_temp_exts
+        .iter()
+        .map(CString::as_c_str)
+        .map(|c_str| c_str.as_ptr())
+        .collect();
 
-    for ext in exts {
-        debug!("Processing input string {}", ext);
-        let ext_str: &str = ext.as_str();
-        debug!("Str: {}: ", ext_str);
-        let ext_cstring: CString = CString::new(ext_str).unwrap();
-        debug!("CString: {:?}", ext_cstring);
-
-        let ext_boxed = ext_cstring.into_boxed_c_str();
-        // let ext_cstr: &CStr = ext_cstring.as_c_str();
-        debug!("Boxed cstring: {:?}", ext_boxed);
-        // debug!("unboxed cstr: {:?}", ext_cstr);
-        let ext_ptr: *const i8 = ext_boxed.as_ptr();
-        // let ext_ptr = ext_cstr.as_ptr();
-
-        debug!("deref'd cstr: {:?}", unsafe { *ext_ptr });
-        debug!("deref'd cstr + 1 {:?}", unsafe { *ext_ptr.offset(1) });
-
-        exts_vec.push(ext_ptr);
-        debug!("Extension 0 (in loop) {:?}", *(exts_vec.get(0).unwrap()));
-        let post_push_ptr: &*const i8 = exts_vec.get(0).unwrap();
-        debug!("deref'd cstr post-push: {:?}", unsafe { **post_push_ptr });
-    }
-
-    let post_push_ptr: &*const i8 = exts_vec.get(0).unwrap();
-    debug!("deref'd cstr post-scope: {:?}", unsafe { **post_push_ptr });
-    debug!("{} extensions being requested", exts_vec.len());
-    // debug!("Extension 0 {:?}", unsafe { **(exts_vec.get(0).unwrap()) });
-    unsafe {
-        let mut temp_vec = exts_vec.clone();
-        let temp = temp_vec.pop().unwrap();
-        let mut count = 0;
-
-        while *temp.offset(count) != 0 {
-            debug!("Offset {}, value {:#4x}", count, *temp.offset(count));
-            count += 1;
-        }
-    }
-    let physical_features = setup_physical_features();
-
-    let khr_swapchain_name = CString::new("VK_KHR_swapchain").unwrap();
-    let exts_arr = [khr_swapchain_name.as_c_str().as_ptr()];
+    // let physical_features = setup_physical_features(instance);
+    let physical_features = unsafe { instance.get_physical_device_features(p_dev) };
 
     let mut create_info = DeviceCreateInfo::default()
         .queue_create_infos(queue_selection.as_slice())
-        .enabled_features(&physical_features)
-        .enabled_extension_names(&exts_arr);
-    // .enabled_extension_names(exts_vec.as_slice());
+        .enabled_extension_names(&exts_arr)
+        .enabled_features(&physical_features);
 
     match unsafe { instance.create_device(p_dev, &create_info, None) } {
         Ok(device) => device,
@@ -306,53 +275,6 @@ pub fn make_logical_device(
             )
         }
     }
-}
-
-pub fn setup_physical_features() -> PhysicalDeviceFeatures {
-    PhysicalDeviceFeatures::default()
-        .robust_buffer_access(true)
-        .full_draw_index_uint32(true)
-        .image_cube_array(true)
-        .independent_blend(true)
-        .geometry_shader(true)
-        .tessellation_shader(true)
-        .sample_rate_shading(true)
-        .dual_src_blend(true)
-        .logic_op(true)
-        .multi_draw_indirect(true)
-        .draw_indirect_first_instance(true)
-        .depth_clamp(true)
-        .depth_bias_clamp(true)
-        .fill_mode_non_solid(true)
-        .depth_bounds(true)
-        .wide_lines(true)
-        .large_points(true)
-        .alpha_to_one(true)
-        .multi_viewport(true)
-        .sampler_anisotropy(true)
-        .texture_compression_etc2(true)
-        .texture_compression_astc_ldr(true)
-        .occlusion_query_precise(true)
-        .pipeline_statistics_query(true)
-        .vertex_pipeline_stores_and_atomics(true)
-        .fragment_stores_and_atomics(true)
-        .shader_tessellation_and_geometry_point_size(true)
-        .shader_image_gather_extended(true)
-        .shader_storage_image_extended_formats(true)
-        .shader_storage_image_multisample(true)
-        .shader_storage_image_read_without_format(true)
-        .shader_storage_image_read_without_format(true)
-        .shader_uniform_buffer_array_dynamic_indexing(true)
-        .shader_sampled_image_array_dynamic_indexing(true)
-        .shader_storage_buffer_array_dynamic_indexing(true)
-        .shader_storage_image_array_dynamic_indexing(true)
-        .shader_clip_distance(true)
-        .shader_cull_distance(true)
-        .shader_float64(true)
-        .shader_int64(true)
-        .shader_int16(true)
-        .shader_resource_residency(true)
-        .shader_resource_min_lod(true)
 }
 
 pub fn select_physical_device_queues<'a>(
@@ -380,6 +302,36 @@ pub fn select_physical_device_queues<'a>(
         }
     }
     queue_selection
+}
+
+pub fn find_formats_and_colorspaces(
+    instance: &ash::khr::surface::Instance,
+    p_dev: PhysicalDevice,
+    surface: &SurfaceKHR,
+) -> ash::vk::SurfaceFormatKHR {
+    let formats = match unsafe { instance.get_physical_device_surface_formats(p_dev, *surface) } {
+        Ok(formats) => formats,
+        Err(msg) => {
+            panic!(
+                "Querying physical device & surface for supported formats failed: {}",
+                msg
+            );
+        }
+    };
+
+    match formats
+        .iter()
+        .filter(|format| {
+            format.format == ash::vk::Format::B8G8R8A8_SRGB
+                || format.format == ash::vk::Format::R8G8B8A8_SRGB
+        })
+        .nth(0)
+    {
+        Some(format) => *format,
+        None => {
+            panic!("No 32-bit SRGB format was discovered - aborting launch.");
+        }
+    }
 }
 
 fn scan(vk_entry: &Entry) {

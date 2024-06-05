@@ -7,7 +7,7 @@ use setup::xcb_window;
 use std::thread;
 use xcb::x::Window;
 
-use crate::input::input::KeyStroke;
+use crate::{input::input::KeyStroke, setup::instance::khr_surface_instance};
 
 fn main() {
     env_logger::init();
@@ -42,6 +42,7 @@ fn main() {
         &best_dev,
         &_vk_surface,
     );
+    setup::instance::find_formats_and_colorspaces(&khr_surface_instance, best_dev, &_vk_surface);
 
     debug!(
         "Extents? {}x{}",

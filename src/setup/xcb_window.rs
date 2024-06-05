@@ -123,6 +123,11 @@ pub fn resize_window(conn: &Connection, window_id: Window, upper_left: Point, di
         drawable: x::Drawable::Window(window_id),
     };
 
+    debug!("Attempting to confirm resize command was successful.");
+    debug!(
+        "Checking against           ({}, {}), {}x{}",
+        upper_left.0, upper_left.1, dim.0, dim.1
+    );
     loop {
         let cookie = conn.send_request(&confirm_change);
 
@@ -134,11 +139,20 @@ pub fn resize_window(conn: &Connection, window_id: Window, upper_left: Point, di
                     geom_reply.width(),
                     geom_reply.height(),
                 );
-                if x as i32 == upper_left.0
-                    && y as i32 == upper_left.1
-                    && width as u32 == dim.0
-                    && height as u32 == dim.1
-                {
+                debug!(
+                    "Window is currently     ({}, {}), {}x{}",
+                    x, y, width, height
+                );
+                // The x and y coordinates do not behave as expected on a multi-monitor display.
+                // The reasons for this are, as yet, unclear.  What I do know is that the
+                // update command _does_ change the x and y axis - they will show initially as
+                // (10, 10) as per the create_window func, but then change immediately to (0, 0).
+                // The window manager is clearly doing some piddling about with the window
+                // upper left coordinatges - possibly because it is fullscreen?
+                // Regardless, we will remove checking for the upper left coordiantes.
+                // if x as i32 == upper_left.0 &&
+                // y as i32 == upper_left.1 &&
+                if width as u32 == dim.0 && height as u32 == dim.1 {
                     break;
                 } else {
                     std::thread::sleep(Duration::from_millis(500));
@@ -173,8 +187,8 @@ pub fn create_window(conn: &Connection, display_num: i32) -> Window {
         depth: parent_depth,
         wid: window_id,
         parent: parent_win,
-        x: 0,
-        y: 0,
+        x: 10,
+        y: 10,
         width: 1,
         height: 1,
         border_width: 0,
