@@ -1,3 +1,4 @@
+use ash::khr::swapchain;
 use log::debug;
 
 mod input;
@@ -33,29 +34,43 @@ fn main() {
     physical_exts.iter().for_each(|ext| debug!("\t{}", ext));
     let device_queues = setup::instance::select_physical_device_queues(&best_dev, &instance);
     let logical_device =
-        setup::instance::make_logical_device(&instance, best_dev, physical_exts, device_queues);
+        setup::instance::make_logical_device(&instance, best_dev, physical_exts, &device_queues);
     let surface_instance = setup::instance::xcb_surface_instance(&entry, &instance);
     let khr_surface_instance = setup::instance::khr_surface_instance(&entry, &instance);
-    let _vk_surface = setup::instance::xcb_surface(&surface_instance, _xcb_ptr, &window);
+    let vk_surface = setup::instance::xcb_surface(&surface_instance, _xcb_ptr, &window);
     let caps = setup::instance::map_physical_device_to_surface_properties(
         &khr_surface_instance,
         &best_dev,
-        &_vk_surface,
+        &vk_surface,
     );
-    setup::instance::find_formats_and_colorspaces(&khr_surface_instance, best_dev, &_vk_surface);
+    setup::instance::test_capabilities(&caps);
+    let surface_formats =
+        setup::instance::find_formats_and_colorspaces(&khr_surface_instance, best_dev, &vk_surface);
+    let swapchain_device = setup::instance::make_surface_device(&instance, &logical_device);
+    let swapchain = setup::instance::make_swapchain(
+        &swapchain_device,
+        vk_surface,
+        &surface_formats,
+        &device_queues,
+        &caps,
+    );
 
     debug!(
         "Extents? {}x{}",
         caps.current_extent.width, caps.current_extent.height
     );
+    debug!("Available transforms: {:?}", caps.supported_transforms);
+    debug!("Available image usages: {:?}", caps.supported_usage_flags);
+    debug!(
+        "Available alpha values: {:?}",
+        caps.supported_composite_alpha
+    );
     debug!("Buffers? {}-{}", caps.min_image_count, caps.max_image_count);
 
     debug!("The...instance was created?");
 
-    // let instance = unsafe { vk_entry.create_instance(&instance_info_bldr, allocation_callbacks) };
-
-    let surface_instance = ash::khr::surface::Instance::new(&entry, &instance);
-    unsafe { surface_instance.destroy_surface(_vk_surface, None) };
+    unsafe { swapchain_device.destroy_swapchain(swapchain, None) };
+    unsafe { khr_surface_instance.destroy_surface(vk_surface, None) };
     unsafe { instance.destroy_instance(None) };
 
     debug!("Vulkan instance destroyed...");

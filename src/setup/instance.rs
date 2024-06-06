@@ -1,8 +1,11 @@
+use ash::khr::swapchain;
 use ash::vk::{
-    ApplicationInfo, DeviceCreateInfo, DeviceQueueCreateInfo, Format, InstanceCreateInfo,
-    PhysicalDevice, PhysicalDeviceFeatures, PhysicalDeviceProperties, PhysicalDeviceType,
-    QueueFamilyProperties, QueueFlags, SurfaceCapabilitiesKHR, SurfaceKHR, SwapchainCreateFlagsKHR,
-    SwapchainCreateInfoKHR, SwapchainKHR, XcbSurfaceCreateInfoKHR,
+    ApplicationInfo, CompositeAlphaFlagsKHR, DeviceCreateInfo, DeviceQueueCreateInfo, Extent2D,
+    ImageUsageFlags, InstanceCreateInfo, PhysicalDevice, PhysicalDeviceFeatures,
+    PhysicalDeviceProperties, PhysicalDeviceType, PresentModeKHR, QueueFamilyProperties,
+    QueueFlags, SharingMode, SurfaceCapabilitiesKHR, SurfaceFormatKHR, SurfaceKHR,
+    SurfaceTransformFlagsKHR, SwapchainCreateFlagsKHR, SwapchainCreateInfoKHR, SwapchainKHR,
+    XcbSurfaceCreateInfoKHR,
 };
 use ash::{Device, Entry, Instance};
 use core::panic;
@@ -237,7 +240,7 @@ pub fn make_logical_device(
     instance: &Instance,
     p_dev: PhysicalDevice,
     exts: Vec<String>,
-    queue_selection: Vec<DeviceQueueCreateInfo>,
+    queue_selection: &Vec<DeviceQueueCreateInfo>,
 ) -> Device {
     // This initial copy operation is required to give the CStrings a long-lived
     // place to stay.  Previous tries resulted in garbage being captured for the
@@ -289,7 +292,8 @@ pub fn select_physical_device_queues<'a>(
             "Testing queue {}.  Properties/count: {:?}/{}",
             index, family.queue_flags, family.queue_count
         );
-        if family.queue_flags == QueueFlags::TRANSFER | QueueFlags::COMPUTE | QueueFlags::GRAPHICS {
+        if family.queue_flags == (QueueFlags::TRANSFER | QueueFlags::COMPUTE | QueueFlags::GRAPHICS)
+        {
             debug!("Found matching queue.");
             let queue_count = u32::min(family.queue_count, 3);
             debug!("Requesting {} queues.", queue_count);
@@ -297,7 +301,6 @@ pub fn select_physical_device_queues<'a>(
                 DeviceQueueCreateInfo::default().queue_family_index(index as u32);
             queue_create_info.queue_count = queue_count;
             queue_create_info.queue_priorities(vec![0.5; queue_count as usize].as_slice());
-
             queue_selection.push(queue_create_info);
         }
     }
@@ -319,17 +322,77 @@ pub fn find_formats_and_colorspaces(
         }
     };
 
-    match formats
-        .iter()
-        .filter(|format| {
-            format.format == ash::vk::Format::B8G8R8A8_SRGB
-                || format.format == ash::vk::Format::R8G8B8A8_SRGB
-        })
-        .nth(0)
-    {
+    match formats.iter().find(|format| {
+        format.format == ash::vk::Format::B8G8R8A8_SRGB
+            || format.format == ash::vk::Format::R8G8B8A8_SRGB
+    }) {
         Some(format) => *format,
         None => {
             panic!("No 32-bit SRGB format was discovered - aborting launch.");
+        }
+    }
+}
+
+pub fn test_capabilities(surface_capabilities: &SurfaceCapabilitiesKHR) {
+    if surface_capabilities.min_image_count < 2 {
+        panic!("Double buffering unsupported by the surface.");
+    }
+    if !surface_capabilities
+        .supported_usage_flags
+        .contains(ImageUsageFlags::TRANSFER_DST)
+    {
+        panic!("Unable to use surface as a transfer destination.")
+    }
+    if !surface_capabilities
+        .supported_transforms
+        .contains(SurfaceTransformFlagsKHR::IDENTITY)
+    {
+        panic!("Unable to display image with 0° rotation.");
+    }
+    if !surface_capabilities
+        .supported_composite_alpha
+        .contains(CompositeAlphaFlagsKHR::OPAQUE)
+    {
+        panic!("Unable to display opaque/non-transparent image.");
+    }
+}
+
+pub fn make_surface_device(instance: &Instance, device: &Device) -> ash::khr::swapchain::Device {
+    ash::khr::swapchain::Device::new(instance, device)
+}
+
+pub fn make_swapchain(
+    device: &ash::khr::swapchain::Device,
+    surface: SurfaceKHR,
+    formatting: &SurfaceFormatKHR,
+    queue_families: &Vec<DeviceQueueCreateInfo>,
+    surface_capabilities: &SurfaceCapabilitiesKHR,
+) -> SwapchainKHR {
+    let queue_family_indices: Vec<u32> = queue_families
+        .iter()
+        .map(|qf| qf.queue_family_index)
+        .collect();
+
+    let swapchain_info = SwapchainCreateInfoKHR::default()
+        .flags(SwapchainCreateFlagsKHR::empty())
+        .surface(surface)
+        .min_image_count(2)
+        .image_format(formatting.format)
+        .image_color_space(formatting.color_space)
+        .image_extent(surface_capabilities.current_extent)
+        .image_array_layers(1)
+        .image_usage(ImageUsageFlags::TRANSFER_DST)
+        .image_sharing_mode(SharingMode::EXCLUSIVE)
+        .queue_family_indices(queue_family_indices.as_slice())
+        .pre_transform(surface_capabilities.current_transform)
+        .composite_alpha(CompositeAlphaFlagsKHR::OPAQUE)
+        .present_mode(PresentModeKHR::MAILBOX)
+        .clipped(true);
+
+    match unsafe { device.create_swapchain(&swapchain_info, None) } {
+        Ok(sc) => sc,
+        Err(msg) => {
+            panic!("Swapchain creation failed: {:?}", msg);
         }
     }
 }
