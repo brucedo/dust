@@ -1,23 +1,17 @@
-use ash::khr::swapchain;
 use ash::vk::{
-    ApplicationInfo, CompositeAlphaFlagsKHR, DeviceCreateInfo, DeviceQueueCreateInfo, Extent2D,
-    ImageUsageFlags, InstanceCreateInfo, PhysicalDevice, PhysicalDeviceFeatures,
-    PhysicalDeviceProperties, PhysicalDeviceType, PresentModeKHR, QueueFamilyProperties,
-    QueueFlags, SharingMode, SurfaceCapabilitiesKHR, SurfaceFormatKHR, SurfaceKHR,
-    SurfaceTransformFlagsKHR, SwapchainCreateFlagsKHR, SwapchainCreateInfoKHR, SwapchainKHR,
-    XcbSurfaceCreateInfoKHR,
+    ApplicationInfo, CompositeAlphaFlagsKHR, DeviceCreateInfo, DeviceQueueCreateInfo,
+    ImageUsageFlags, InstanceCreateInfo, PhysicalDevice, PhysicalDeviceProperties,
+    PhysicalDeviceType, PresentModeKHR, QueueFlags, SharingMode, SurfaceCapabilitiesKHR,
+    SurfaceFormatKHR, SurfaceKHR, SurfaceTransformFlagsKHR, SwapchainCreateFlagsKHR,
+    SwapchainCreateInfoKHR, SwapchainKHR, XcbSurfaceCreateInfoKHR,
 };
 use ash::{Device, Entry, Instance};
 use core::panic;
-use log::{debug, error, warn};
-use std::borrow::Borrow;
+use log::{debug, error};
 use std::ffi::{c_void, CStr, CString};
-use std::ops::Deref;
 use xcb::ffi::xcb_connection_t;
 use xcb::x::Window;
 use xcb::Xid;
-
-use crate::setup::xcb_keymapper::new;
 
 type Index = usize;
 type Count = u32;
@@ -34,11 +28,6 @@ pub fn init() -> ash::Entry {
 
 #[cfg(all(target_os = "linux", not(target_os = "windows")))]
 pub fn instance(entry: &ash::Entry) -> ash::Instance {
-    use std::{
-        thread::{self, sleep},
-        time::Duration,
-    };
-
     // sleep(Duration::from_secs(10));
 
     debug!("Starting instance creation...");
@@ -292,7 +281,9 @@ pub fn select_physical_device_queues<'a>(
             "Testing queue {}.  Properties/count: {:?}/{}",
             index, family.queue_flags, family.queue_count
         );
-        if family.queue_flags == (QueueFlags::TRANSFER | QueueFlags::COMPUTE | QueueFlags::GRAPHICS)
+        if family
+            .queue_flags
+            .contains(QueueFlags::TRANSFER | QueueFlags::COMPUTE | QueueFlags::GRAPHICS)
         {
             debug!("Found matching queue.");
             let queue_count = u32::min(family.queue_count, 3);
@@ -305,6 +296,50 @@ pub fn select_physical_device_queues<'a>(
         }
     }
     queue_selection
+}
+
+pub fn select_presentation_queues<'a>(
+    device: &'_ PhysicalDevice,
+    surface: &'_ SurfaceKHR,
+    physical_queues: &'a Vec<DeviceQueueCreateInfo>,
+    instance: &ash::khr::surface::Instance,
+) -> Vec<&'a DeviceQueueCreateInfo<'a>> {
+    debug!("Filtering selected queues for those that are presentation queues");
+    debug!(
+        "{} queues have been presented for review.",
+        physical_queues.len()
+    );
+    let mut presentation_queues: Vec<&'a DeviceQueueCreateInfo> = Vec::new();
+
+    for device_queue in physical_queues {
+        debug!("  Testing queue {}", device_queue.queue_family_index);
+        match unsafe {
+            instance.get_physical_device_surface_support(
+                *device,
+                device_queue.queue_family_index,
+                *surface,
+            )
+        } {
+            Ok(true) => {
+                debug!(
+                    "Queue index {} supports writing to a surface.",
+                    device_queue.queue_family_index
+                );
+                presentation_queues.push(device_queue);
+            }
+            Ok(false) => {
+                debug!(
+                    "Queue index {} does not support writing to a surface.",
+                    device_queue.queue_family_index
+                )
+            }
+            Err(msg) => {
+                error!("Querying the physical device's support for surface-writing queues generated error {:?}", msg)
+            }
+        }
+    }
+
+    presentation_queues
 }
 
 pub fn find_formats_and_colorspaces(
