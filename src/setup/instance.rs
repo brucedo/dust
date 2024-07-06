@@ -9,6 +9,8 @@ use ash::{Device, Entry, Instance};
 use core::panic;
 use log::{debug, error};
 use std::ffi::{c_void, CStr, CString};
+use std::thread::sleep;
+use std::time::Duration;
 use xcb::ffi::xcb_connection_t;
 use xcb::x::Window;
 use xcb::Xid;
@@ -28,7 +30,7 @@ pub fn init() -> ash::Entry {
 
 #[cfg(all(target_os = "linux", not(target_os = "windows")))]
 pub fn instance(entry: &ash::Entry) -> ash::Instance {
-    // sleep(Duration::from_secs(10));
+    sleep(Duration::from_secs(10));
 
     debug!("Starting instance creation...");
     let app_name = CString::new("Dust for Linux").unwrap();
@@ -400,7 +402,8 @@ pub fn make_swapchain(
     device: &ash::khr::swapchain::Device,
     surface: SurfaceKHR,
     formatting: &SurfaceFormatKHR,
-    queue_families: &Vec<DeviceQueueCreateInfo>,
+    queue_families: &[DeviceQueueCreateInfo],
+    // queue_families: &Vec<DeviceQueueCreateInfo>,
     surface_capabilities: &SurfaceCapabilitiesKHR,
 ) -> SwapchainKHR {
     let queue_family_indices: Vec<u32> = queue_families
