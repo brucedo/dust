@@ -69,6 +69,12 @@ fn main() {
         &caps,
     );
 
+    let swapchain_images = setup::instance::swapchain_images(&swapchain_device, swapchain);
+    debug!(
+        "Count of images provided by the swapchain: {}",
+        swapchain_images.len()
+    );
+
     debug!(
         "Extents? {}x{}",
         caps.current_extent.width, caps.current_extent.height

@@ -1,5 +1,5 @@
 use ash::vk::{
-    ApplicationInfo, CompositeAlphaFlagsKHR, DeviceCreateInfo, DeviceQueueCreateInfo,
+    ApplicationInfo, CompositeAlphaFlagsKHR, DeviceCreateInfo, DeviceQueueCreateInfo, Image,
     ImageUsageFlags, InstanceCreateInfo, PhysicalDevice, PhysicalDeviceProperties,
     PhysicalDeviceType, PresentModeKHR, QueueFlags, SharingMode, SurfaceCapabilitiesKHR,
     SurfaceFormatKHR, SurfaceKHR, SurfaceTransformFlagsKHR, SwapchainCreateFlagsKHR,
@@ -431,6 +431,21 @@ pub fn make_swapchain(
         Ok(sc) => sc,
         Err(msg) => {
             panic!("Swapchain creation failed: {:?}", msg);
+        }
+    }
+}
+
+pub fn swapchain_images(
+    device: &ash::khr::swapchain::Device,
+    swapchain: ash::vk::SwapchainKHR,
+) -> Vec<Image> {
+    match unsafe { device.get_swapchain_images(swapchain) } {
+        Ok(images) => images,
+        Err(msg) => {
+            panic!(
+                "Could not retrieve the collection of swapchian images: {:?}",
+                msg
+            )
         }
     }
 }
