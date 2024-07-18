@@ -75,6 +75,11 @@ fn main() {
         swapchain_images.len()
     );
 
+    let swapchain_views =
+        setup::instance::image_views(&logical_device, swapchain_images, surface_formats.format);
+
+    debug!("Count of image views: {}", swapchain_views.len());
+
     debug!(
         "Extents? {}x{}",
         caps.current_extent.width, caps.current_extent.height

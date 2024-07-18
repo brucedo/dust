@@ -1,9 +1,10 @@
 use ash::vk::{
-    ApplicationInfo, CompositeAlphaFlagsKHR, DeviceCreateInfo, DeviceQueueCreateInfo, Image,
-    ImageUsageFlags, InstanceCreateInfo, PhysicalDevice, PhysicalDeviceProperties,
-    PhysicalDeviceType, PresentModeKHR, QueueFlags, SharingMode, SurfaceCapabilitiesKHR,
-    SurfaceFormatKHR, SurfaceKHR, SurfaceTransformFlagsKHR, SwapchainCreateFlagsKHR,
-    SwapchainCreateInfoKHR, SwapchainKHR, XcbSurfaceCreateInfoKHR,
+    ApplicationInfo, ComponentSwizzle, CompositeAlphaFlagsKHR, DeviceCreateInfo,
+    DeviceQueueCreateInfo, Format, Image, ImageAspectFlags, ImageCreateInfo, ImageUsageFlags,
+    ImageView, ImageViewCreateInfo, ImageViewType, InstanceCreateInfo, PhysicalDevice,
+    PhysicalDeviceProperties, PhysicalDeviceType, PresentModeKHR, QueueFlags, SharingMode,
+    SurfaceCapabilitiesKHR, SurfaceFormatKHR, SurfaceKHR, SurfaceTransformFlagsKHR,
+    SwapchainCreateFlagsKHR, SwapchainCreateInfoKHR, SwapchainKHR, XcbSurfaceCreateInfoKHR,
 };
 use ash::{Device, Entry, Instance};
 use core::panic;
@@ -448,6 +449,43 @@ pub fn swapchain_images(
             )
         }
     }
+}
+
+pub fn image_views(
+    device: &ash::Device,
+    images: Vec<Image>,
+    surface_format: Format,
+) -> Vec<ImageView> {
+    let mut views = Vec::with_capacity(images.len());
+
+    for image in images {
+        let create_info = ImageViewCreateInfo::default()
+            .image(image)
+            .view_type(ImageViewType::TYPE_2D)
+            .format(surface_format)
+            .components(ash::vk::ComponentMapping {
+                r: ComponentSwizzle::IDENTITY,
+                g: ComponentSwizzle::IDENTITY,
+                b: ComponentSwizzle::IDENTITY,
+                a: ComponentSwizzle::IDENTITY,
+            })
+            .subresource_range(ash::vk::ImageSubresourceRange {
+                aspect_mask: ImageAspectFlags::COLOR,
+                base_mip_level: 0,
+                level_count: 1,
+                base_array_layer: 0,
+                layer_count: 1,
+            });
+
+        match unsafe { device.create_image_view(&create_info, None) } {
+            Ok(view) => views.push(view),
+            Err(msg) => {
+                panic!("An image view creation failed: {:?}", msg);
+            }
+        }
+    }
+
+    views
 }
 
 fn scan(vk_entry: &Entry) {
