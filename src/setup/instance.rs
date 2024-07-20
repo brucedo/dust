@@ -1,10 +1,5 @@
 use ash::vk::{
-    ApplicationInfo, ComponentSwizzle, CompositeAlphaFlagsKHR, DeviceCreateInfo,
-    DeviceQueueCreateInfo, Format, Image, ImageAspectFlags, ImageCreateInfo, ImageUsageFlags,
-    ImageView, ImageViewCreateInfo, ImageViewType, InstanceCreateInfo, PhysicalDevice,
-    PhysicalDeviceProperties, PhysicalDeviceType, PresentModeKHR, QueueFlags, SharingMode,
-    SurfaceCapabilitiesKHR, SurfaceFormatKHR, SurfaceKHR, SurfaceTransformFlagsKHR,
-    SwapchainCreateFlagsKHR, SwapchainCreateInfoKHR, SwapchainKHR, XcbSurfaceCreateInfoKHR,
+    ApplicationInfo, ComponentSwizzle, CompositeAlphaFlagsKHR, DeviceCreateInfo, DeviceQueueCreateInfo, Format, Image, ImageAspectFlags, ImageCreateInfo, ImageUsageFlags, ImageView, ImageViewCreateInfo, ImageViewType, InstanceCreateInfo, PhysicalDevice, PhysicalDeviceProperties, PhysicalDeviceType, PresentModeKHR, QueueFamilyProperties, QueueFlags, SharingMode, SurfaceCapabilitiesKHR, SurfaceFormatKHR, SurfaceKHR, SurfaceTransformFlagsKHR, SwapchainCreateFlagsKHR, SwapchainCreateInfoKHR, SwapchainKHR, XcbSurfaceCreateInfoKHR
 };
 use ash::{Device, Entry, Instance};
 use core::panic;
@@ -18,6 +13,117 @@ use xcb::Xid;
 
 type Index = usize;
 type Count = u32;
+pub struct VkContext<'a> {
+    entry: ash::Entry,
+    instance: ash::Instance,
+    physical_device: PhysicalDevice,
+    physical_ext_names: Vec<String>,
+    device_queue_create_info: Vec<DeviceQueueCreateInfo<'a>>,
+    logical_device: Device,
+    khr_surface_instance: ash::khr::surface::Instance,
+    surface: SurfaceKHR,
+    surface_capabilities: SurfaceCapabilitiesKHR,
+    surface_formats: SurfaceFormatKHR,
+    // presentation_queues: Vec<&'a DeviceQueueCreateInfo<'a>>,
+    swapchain_device: ash::khr::swapchain::Device,
+    swapchain: SwapchainKHR,
+    swapchain_images: Vec<Image>,
+    swapchain_views: Vec<ImageView>,
+}
+
+#[cfg(all(target_os = "linux", not(target_os = "windows")))]
+pub fn default(xcb_ptr: *mut xcb_connection_t, xcb_window: &Window) -> VkContext {
+    let entry: ash::Entry = init();
+    let instance: ash::Instance = instance(&entry);
+
+    let physical_device: PhysicalDevice = enumerate_physical_devs(&instance);
+    let physical_ext_names: Vec<String> =
+        find_extensions_supported_by_pdev(&instance, physical_device);
+
+    let queue_family_properties =
+        unsafe { instance.get_physical_device_queue_family_properties2_len(physical_device) };
+
+    let device_queue_create_info: Vec<DeviceQueueCreateInfo> =
+        select_physical_device_queues(&physical_device, &instance);
+    let logical_device: Device = make_logical_device(
+        &instance,
+        physical_device,
+        physical_ext_names,
+        &device_queue_create_info,
+    );
+
+    let xcb_surface_instance: ash::khr::xcb_surface::Instance =
+        ash::khr::xcb_surface::Instance::new(&entry, &instance);
+    let khr_surface_instance: ash::khr::surface::Instance =
+        ash::khr::surface::Instance::new(&entry, &instance);
+    let surface: SurfaceKHR = xcb_surface(&xcb_surface_instance, xcb_ptr, xcb_window);
+
+    let surface_capabilities: SurfaceCapabilitiesKHR = map_physical_device_to_surface_properties(
+        &khr_surface_instance,
+        &physical_device,
+        &surface,
+    );
+    let surface_formats: SurfaceFormatKHR =
+        find_formats_and_colorspaces(&khr_surface_instance, physical_device, &surface);
+    // let presentation_queues: Vec<&DeviceQueueCreateInfo> = select_presentation_queues(
+    //     &physical_device,
+    //     &surface,
+    //     &device_queue_create_info,
+    //     &khr_surface_instance,
+    // );
+
+    let swapchain_device: ash::khr::swapchain::Device =
+        ash::khr::swapchain::Device::new(&instan;ce, &logical_device);
+    let swapchain: SwapchainKHR = make_swapchain(
+        &swapchain_device,
+        surface,
+        &surface_formats,
+        &device_queue_create_info,
+        &surface_capabilities,
+    );
+
+    let swapchain_images: Vec<Image> = swapchain_images(&swapchain_device, swapchain);
+    let swapchain_views: Vec<ImageView> =
+        image_views(&logical_device, swapchain_images, surface_formats.format);
+
+    VkContext {
+        entry,
+        instance,
+        physical_device,
+        physical_ext_names,
+        device_queue_create_info,
+        logical_device,
+        khr_surface_instance,
+        surface,
+        surface_capabilities,
+        surface_formats,
+        // presentation_queues,
+        swapchain_device,
+        swapchain,
+        swapchain_images,
+        swapchain_views,
+    }
+}
+
+#[cfg(all(target_os = "windows", not(target_os = "linux")))]
+pub fn default() -> VkContext<'a> {}
+
+#[cfg(all(not(target_os = "windows"), not(target_os = "linux")))]
+pub fn default() {
+    panic!("No support for OSes other than Windows or Linux")
+}
+
+impl<'a> Drop for VkContext<'a> {
+    fn drop(&mut self) {
+        unsafe {
+            self.swapchain_device
+                .destroy_swapchain(self.swapchain, None);
+            self.khr_surface_instance
+                .destroy_surface(self.surface, None);
+            self.instance.destroy_instance(None);
+        };
+    }
+}
 
 pub fn init() -> ash::Entry {
     debug!("Starting initialization");
@@ -280,6 +386,36 @@ pub fn select_physical_device_queues<'a>(
     let queue_families = unsafe { instance.get_physical_device_queue_family_properties(*device) };
 
     for (index, family) in queue_families.iter().enumerate() {
+        debug!(
+            "Testing queue {}.  Properties/count: {:?}/{}",
+            index, family.queue_flags, family.queue_count
+        );
+        if family
+            .queue_flags
+            .contains(QueueFlags::TRANSFER | QueueFlags::COMPUTE | QueueFlags::GRAPHICS)
+        {
+            debug!("Found matching queue.");
+            let queue_count = u32::min(family.queue_count, 3);
+            debug!("Requesting {} queues.", queue_count);
+            let mut queue_create_info =
+                DeviceQueueCreateInfo::default().queue_family_index(index as u32);
+            queue_create_info.queue_count = queue_count;
+            queue_create_info.queue_priorities(vec![0.5; queue_count as usize].as_slice());
+            queue_selection.push(queue_create_info);
+        }
+    }
+    queue_selection
+}
+
+fn select_device_queues_with_priority<'a> (
+    queue_family_properties: Vec<QueueFamilyProperties>
+    priorities_
+) -> Vec<DeviceQueueCreateInfo<'a>> {
+    
+    let mut queue_selection = Vec::new();
+
+
+    for (index, family) in queue_family_properties.iter().enumerate() {
         debug!(
             "Testing queue {}.  Properties/count: {:?}/{}",
             index, family.queue_flags, family.queue_count
