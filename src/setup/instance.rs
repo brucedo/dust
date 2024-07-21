@@ -1,5 +1,11 @@
 use ash::vk::{
-    ApplicationInfo, ComponentSwizzle, CompositeAlphaFlagsKHR, DeviceCreateInfo, DeviceQueueCreateInfo, Format, Image, ImageAspectFlags, ImageCreateInfo, ImageUsageFlags, ImageView, ImageViewCreateInfo, ImageViewType, InstanceCreateInfo, PhysicalDevice, PhysicalDeviceProperties, PhysicalDeviceType, PresentModeKHR, QueueFamilyProperties, QueueFlags, SharingMode, SurfaceCapabilitiesKHR, SurfaceFormatKHR, SurfaceKHR, SurfaceTransformFlagsKHR, SwapchainCreateFlagsKHR, SwapchainCreateInfoKHR, SwapchainKHR, XcbSurfaceCreateInfoKHR
+    ApplicationInfo, ComponentSwizzle, CompositeAlphaFlagsKHR, DeviceCreateInfo,
+    DeviceQueueCreateInfo, Format, Image, ImageAspectFlags, ImageCreateInfo, ImageUsageFlags,
+    ImageView, ImageViewCreateInfo, ImageViewType, InstanceCreateInfo, PhysicalDevice,
+    PhysicalDeviceProperties, PhysicalDeviceType, PresentModeKHR, QueueFamilyProperties,
+    QueueFlags, SharingMode, SurfaceCapabilitiesKHR, SurfaceFormatKHR, SurfaceKHR,
+    SurfaceTransformFlagsKHR, SwapchainCreateFlagsKHR, SwapchainCreateInfoKHR, SwapchainKHR,
+    XcbSurfaceCreateInfoKHR,
 };
 use ash::{Device, Entry, Instance};
 use core::panic;
@@ -47,8 +53,8 @@ pub fn default(xcb_ptr: *mut xcb_connection_t, xcb_window: &Window) -> VkContext
         select_physical_device_queues(&physical_device, &instance);
     let logical_device: Device = make_logical_device(
         &instance,
-        physical_device,
-        physical_ext_names,
+        &physical_device,
+        &physical_ext_names,
         &device_queue_create_info,
     );
 
@@ -73,7 +79,7 @@ pub fn default(xcb_ptr: *mut xcb_connection_t, xcb_window: &Window) -> VkContext
     // );
 
     let swapchain_device: ash::khr::swapchain::Device =
-        ash::khr::swapchain::Device::new(&instan;ce, &logical_device);
+        ash::khr::swapchain::Device::new(&instance, &logical_device);
     let swapchain: SwapchainKHR = make_swapchain(
         &swapchain_device,
         surface,
@@ -84,7 +90,7 @@ pub fn default(xcb_ptr: *mut xcb_connection_t, xcb_window: &Window) -> VkContext
 
     let swapchain_images: Vec<Image> = swapchain_images(&swapchain_device, swapchain);
     let swapchain_views: Vec<ImageView> =
-        image_views(&logical_device, swapchain_images, surface_formats.format);
+        image_views(&logical_device, &swapchain_images, surface_formats.format);
 
     VkContext {
         entry,
@@ -115,11 +121,16 @@ pub fn default() {
 
 impl<'a> Drop for VkContext<'a> {
     fn drop(&mut self) {
+        debug!("Killing Vulkan objects.");
         unsafe {
+            self.swapchain_views
+                .drain(0..self.swapchain_views.len())
+                .for_each(|view| self.logical_device.destroy_image_view(view, None));
             self.swapchain_device
                 .destroy_swapchain(self.swapchain, None);
             self.khr_surface_instance
                 .destroy_surface(self.surface, None);
+            self.logical_device.destroy_device(None);
             self.instance.destroy_instance(None);
         };
     }
@@ -336,8 +347,8 @@ fn is_wanted_extension(ext_name: &str) -> bool {
 
 pub fn make_logical_device(
     instance: &Instance,
-    p_dev: PhysicalDevice,
-    exts: Vec<String>,
+    p_dev: &PhysicalDevice,
+    exts: &Vec<String>,
     queue_selection: &Vec<DeviceQueueCreateInfo>,
 ) -> Device {
     // This initial copy operation is required to give the CStrings a long-lived
@@ -360,14 +371,14 @@ pub fn make_logical_device(
         .collect();
 
     // let physical_features = setup_physical_features(instance);
-    let physical_features = unsafe { instance.get_physical_device_features(p_dev) };
+    let physical_features = unsafe { instance.get_physical_device_features(*p_dev) };
 
     let mut create_info = DeviceCreateInfo::default()
         .queue_create_infos(queue_selection.as_slice())
         .enabled_extension_names(&exts_arr)
         .enabled_features(&physical_features);
 
-    match unsafe { instance.create_device(p_dev, &create_info, None) } {
+    match unsafe { instance.create_device(*p_dev, &create_info, None) } {
         Ok(device) => device,
         Err(msg) => {
             panic!(
@@ -378,44 +389,14 @@ pub fn make_logical_device(
     }
 }
 
-pub fn select_physical_device_queues<'a>(
+pub fn select_physical_device_queues<'a, 'b>(
     device: &'a PhysicalDevice,
     instance: &'a Instance,
-) -> Vec<DeviceQueueCreateInfo<'a>> {
+) -> Vec<DeviceQueueCreateInfo<'b>> {
     let mut queue_selection = Vec::new();
     let queue_families = unsafe { instance.get_physical_device_queue_family_properties(*device) };
 
     for (index, family) in queue_families.iter().enumerate() {
-        debug!(
-            "Testing queue {}.  Properties/count: {:?}/{}",
-            index, family.queue_flags, family.queue_count
-        );
-        if family
-            .queue_flags
-            .contains(QueueFlags::TRANSFER | QueueFlags::COMPUTE | QueueFlags::GRAPHICS)
-        {
-            debug!("Found matching queue.");
-            let queue_count = u32::min(family.queue_count, 3);
-            debug!("Requesting {} queues.", queue_count);
-            let mut queue_create_info =
-                DeviceQueueCreateInfo::default().queue_family_index(index as u32);
-            queue_create_info.queue_count = queue_count;
-            queue_create_info.queue_priorities(vec![0.5; queue_count as usize].as_slice());
-            queue_selection.push(queue_create_info);
-        }
-    }
-    queue_selection
-}
-
-fn select_device_queues_with_priority<'a> (
-    queue_family_properties: Vec<QueueFamilyProperties>
-    priorities_
-) -> Vec<DeviceQueueCreateInfo<'a>> {
-    
-    let mut queue_selection = Vec::new();
-
-
-    for (index, family) in queue_family_properties.iter().enumerate() {
         debug!(
             "Testing queue {}.  Properties/count: {:?}/{}",
             index, family.queue_flags, family.queue_count
@@ -589,14 +570,14 @@ pub fn swapchain_images(
 
 pub fn image_views(
     device: &ash::Device,
-    images: Vec<Image>,
+    images: &Vec<Image>,
     surface_format: Format,
 ) -> Vec<ImageView> {
     let mut views = Vec::with_capacity(images.len());
 
     for image in images {
         let create_info = ImageViewCreateInfo::default()
-            .image(image)
+            .image(*image)
             .view_type(ImageViewType::TYPE_2D)
             .format(surface_format)
             .components(ash::vk::ComponentMapping {
