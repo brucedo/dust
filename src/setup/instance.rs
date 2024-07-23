@@ -1,11 +1,12 @@
 use ash::vk::{
-    ApplicationInfo, ComponentSwizzle, CompositeAlphaFlagsKHR, DeviceCreateInfo,
-    DeviceQueueCreateInfo, Format, Image, ImageAspectFlags, ImageCreateInfo, ImageUsageFlags,
-    ImageView, ImageViewCreateInfo, ImageViewType, InstanceCreateInfo, PhysicalDevice,
-    PhysicalDeviceProperties, PhysicalDeviceType, PresentModeKHR, QueueFamilyProperties,
-    QueueFlags, SharingMode, SurfaceCapabilitiesKHR, SurfaceFormatKHR, SurfaceKHR,
-    SurfaceTransformFlagsKHR, SwapchainCreateFlagsKHR, SwapchainCreateInfoKHR, SwapchainKHR,
-    XcbSurfaceCreateInfoKHR,
+    ApplicationInfo, BufferCreateInfo, CommandBuffer, CommandBufferAllocateInfo,
+    CommandBufferLevel, CommandPool, CommandPoolCreateFlags, CommandPoolCreateInfo,
+    ComponentSwizzle, CompositeAlphaFlagsKHR, DeviceCreateInfo, DeviceQueueCreateInfo, Format,
+    Image, ImageAspectFlags, ImageCreateInfo, ImageUsageFlags, ImageView, ImageViewCreateInfo,
+    ImageViewType, InstanceCreateInfo, PhysicalDevice, PhysicalDeviceProperties,
+    PhysicalDeviceType, PresentModeKHR, QueueFamilyProperties, QueueFlags, SharingMode,
+    SurfaceCapabilitiesKHR, SurfaceFormatKHR, SurfaceKHR, SurfaceTransformFlagsKHR,
+    SwapchainCreateFlagsKHR, SwapchainCreateInfoKHR, SwapchainKHR, XcbSurfaceCreateInfoKHR,
 };
 use ash::{Device, Entry, Instance};
 use core::panic;
@@ -35,6 +36,8 @@ pub struct VkContext<'a> {
     swapchain: SwapchainKHR,
     swapchain_images: Vec<Image>,
     swapchain_views: Vec<ImageView>,
+    pools: Vec<CommandPool>,
+    buffers: Vec<CommandBuffer>,
 }
 
 #[cfg(all(target_os = "linux", not(target_os = "windows")))]
@@ -92,6 +95,13 @@ pub fn default(xcb_ptr: *mut xcb_connection_t, xcb_window: &Window) -> VkContext
     let swapchain_views: Vec<ImageView> =
         image_views(&logical_device, &swapchain_images, surface_formats.format);
 
+    let mut pools = Vec::new();
+    for queue_info in &device_queue_create_info {
+        pools.push(build_pools(queue_info, &logical_device));
+    }
+
+    let buffers = allocate_command_buffer(pools.first().unwrap(), &logical_device);
+
     VkContext {
         entry,
         instance,
@@ -108,6 +118,8 @@ pub fn default(xcb_ptr: *mut xcb_connection_t, xcb_window: &Window) -> VkContext
         swapchain,
         swapchain_images,
         swapchain_views,
+        pools,
+        buffers,
     }
 }
 
@@ -123,6 +135,10 @@ impl<'a> Drop for VkContext<'a> {
     fn drop(&mut self) {
         debug!("Killing Vulkan objects.");
         unsafe {
+            self.buffers.clear();
+            self.pools
+                .drain(0..self.pools.len())
+                .for_each(|pool| self.logical_device.destroy_command_pool(pool, None));
             self.swapchain_views
                 .drain(0..self.swapchain_views.len())
                 .for_each(|view| self.logical_device.destroy_image_view(view, None));
@@ -133,10 +149,11 @@ impl<'a> Drop for VkContext<'a> {
             self.logical_device.destroy_device(None);
             self.instance.destroy_instance(None);
         };
+        debug!("Vulkan objects destroyed.");
     }
 }
 
-pub fn init() -> ash::Entry {
+fn init() -> ash::Entry {
     debug!("Starting initialization");
     match unsafe { ash::Entry::load() } {
         Ok(entry) => entry,
@@ -147,7 +164,7 @@ pub fn init() -> ash::Entry {
 }
 
 #[cfg(all(target_os = "linux", not(target_os = "windows")))]
-pub fn instance(entry: &ash::Entry) -> ash::Instance {
+fn instance(entry: &ash::Entry) -> ash::Instance {
     sleep(Duration::from_secs(10));
 
     debug!("Starting instance creation...");
@@ -180,22 +197,22 @@ pub fn instance(entry: &ash::Entry) -> ash::Instance {
     }
 }
 
-pub fn xcb_surface_instance(entry: &Entry, instance: &Instance) -> ash::khr::xcb_surface::Instance {
+fn xcb_surface_instance(entry: &Entry, instance: &Instance) -> ash::khr::xcb_surface::Instance {
     ash::khr::xcb_surface::Instance::new(entry, instance)
 }
 
-pub fn khr_surface_instance(entry: &Entry, instance: &Instance) -> ash::khr::surface::Instance {
+fn khr_surface_instance(entry: &Entry, instance: &Instance) -> ash::khr::surface::Instance {
     ash::khr::surface::Instance::new(entry, instance)
 }
 
 #[cfg(all(target_os = "windows", not(target_os = "linux")))]
-pub fn instance() {
+fn instance() {
     let app_info = app_info(CString::new("Dust for Windows").unwrap().as_c_str());
     todo!();
 }
 
 #[cfg(all(not(target_os = "windows"), not(target_os = "linux")))]
-pub fn instance() {
+fn instance() {
     panic!("No support for OSes other than Windows or Linux")
 }
 
@@ -208,7 +225,7 @@ fn app_info(app_name: &CStr) -> ApplicationInfo {
         .engine_version(1)
 }
 
-pub fn xcb_surface(
+fn xcb_surface(
     instance: &ash::khr::xcb_surface::Instance,
     xcb_ptr: *mut xcb_connection_t,
     xcb_window: &Window,
@@ -226,7 +243,7 @@ pub fn xcb_surface(
     }
 }
 
-pub fn enumerate_physical_devs(instance: &Instance) -> PhysicalDevice {
+fn enumerate_physical_devs(instance: &Instance) -> PhysicalDevice {
     let mut p_devs: Vec<PhysicalDevice> =
         if let Ok(enumerable) = unsafe { instance.enumerate_physical_devices() } {
             enumerable
@@ -291,7 +308,7 @@ fn shitty_score_physical_device_properties(device_props: &PhysicalDeviceProperti
     score
 }
 
-pub fn map_physical_device_to_surface_properties(
+fn map_physical_device_to_surface_properties(
     instance: &ash::khr::surface::Instance,
     device: &PhysicalDevice,
     surface: &SurfaceKHR,
@@ -307,10 +324,7 @@ pub fn map_physical_device_to_surface_properties(
     }
 }
 
-pub fn find_extensions_supported_by_pdev(
-    instance: &Instance,
-    p_dev: PhysicalDevice,
-) -> Vec<String> {
+fn find_extensions_supported_by_pdev(instance: &Instance, p_dev: PhysicalDevice) -> Vec<String> {
     let mut extension_list = Vec::new();
     match unsafe { instance.enumerate_device_extension_properties(p_dev) } {
         Ok(props) => {
@@ -345,7 +359,7 @@ fn is_wanted_extension(ext_name: &str) -> bool {
     }
 }
 
-pub fn make_logical_device(
+fn make_logical_device(
     instance: &Instance,
     p_dev: &PhysicalDevice,
     exts: &Vec<String>,
@@ -389,7 +403,7 @@ pub fn make_logical_device(
     }
 }
 
-pub fn select_physical_device_queues<'a, 'b>(
+fn select_physical_device_queues<'a, 'b>(
     device: &'a PhysicalDevice,
     instance: &'a Instance,
 ) -> Vec<DeviceQueueCreateInfo<'b>> {
@@ -418,7 +432,7 @@ pub fn select_physical_device_queues<'a, 'b>(
     queue_selection
 }
 
-pub fn select_presentation_queues<'a>(
+fn select_presentation_queues<'a>(
     device: &'_ PhysicalDevice,
     surface: &'_ SurfaceKHR,
     physical_queues: &'a Vec<DeviceQueueCreateInfo>,
@@ -462,7 +476,7 @@ pub fn select_presentation_queues<'a>(
     presentation_queues
 }
 
-pub fn find_formats_and_colorspaces(
+fn find_formats_and_colorspaces(
     instance: &ash::khr::surface::Instance,
     p_dev: PhysicalDevice,
     surface: &SurfaceKHR,
@@ -488,7 +502,7 @@ pub fn find_formats_and_colorspaces(
     }
 }
 
-pub fn test_capabilities(surface_capabilities: &SurfaceCapabilitiesKHR) {
+fn test_capabilities(surface_capabilities: &SurfaceCapabilitiesKHR) {
     if surface_capabilities.min_image_count < 2 {
         panic!("Double buffering unsupported by the surface.");
     }
@@ -512,11 +526,11 @@ pub fn test_capabilities(surface_capabilities: &SurfaceCapabilitiesKHR) {
     }
 }
 
-pub fn make_surface_device(instance: &Instance, device: &Device) -> ash::khr::swapchain::Device {
+fn make_surface_device(instance: &Instance, device: &Device) -> ash::khr::swapchain::Device {
     ash::khr::swapchain::Device::new(instance, device)
 }
 
-pub fn make_swapchain(
+fn make_swapchain(
     device: &ash::khr::swapchain::Device,
     surface: SurfaceKHR,
     formatting: &SurfaceFormatKHR,
@@ -553,7 +567,7 @@ pub fn make_swapchain(
     }
 }
 
-pub fn swapchain_images(
+fn swapchain_images(
     device: &ash::khr::swapchain::Device,
     swapchain: ash::vk::SwapchainKHR,
 ) -> Vec<Image> {
@@ -568,7 +582,7 @@ pub fn swapchain_images(
     }
 }
 
-pub fn image_views(
+fn image_views(
     device: &ash::Device,
     images: &Vec<Image>,
     surface_format: Format,
@@ -603,6 +617,33 @@ pub fn image_views(
     }
 
     views
+}
+
+fn build_pools<'a>(queue_info: &'a DeviceQueueCreateInfo, device: &'a ash::Device) -> CommandPool {
+    let pool_create_info = CommandPoolCreateInfo::default()
+        .flags(CommandPoolCreateFlags::RESET_COMMAND_BUFFER)
+        .queue_family_index(queue_info.queue_family_index);
+
+    match unsafe { device.create_command_pool(&pool_create_info, None) } {
+        Ok(pool) => pool,
+        Err(msg) => {
+            panic!("The command pool creation step failed: {:?}", msg);
+        }
+    }
+}
+
+fn allocate_command_buffer(command_pool: &CommandPool, device: &ash::Device) -> Vec<CommandBuffer> {
+    let buffer_info = CommandBufferAllocateInfo::default()
+        .command_pool(*command_pool)
+        .level(CommandBufferLevel::PRIMARY)
+        .command_buffer_count(1);
+
+    match unsafe { device.allocate_command_buffers(&buffer_info) } {
+        Ok(buffer) => buffer,
+        Err(msg) => {
+            panic!("Command buffer allocation from pool failed: {:?}", msg);
+        }
+    }
 }
 
 fn scan(vk_entry: &Entry) {

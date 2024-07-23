@@ -10,7 +10,7 @@ use xcb::x::Window;
 
 use crate::{
     input::input::KeyStroke,
-    setup::instance::{self, instance, khr_surface_instance, select_presentation_queues},
+    setup::instance::{self},
 };
 
 fn main() {
