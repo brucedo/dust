@@ -1,10 +1,13 @@
-use ash::khr::swapchain;
-use log::debug;
+use ash::{
+    khr::swapchain,
+    vk::{BufferCreateInfo, BufferUsageFlags, SharingMode},
+};
+use log::{debug, warn};
 
 mod input;
 mod setup;
 
-use setup::xcb_window;
+use setup::{instance::VkContext, xcb_window};
 use std::thread;
 use xcb::x::Window;
 
@@ -31,74 +34,21 @@ fn main() {
 
     let vk_context = instance::default(_xcb_ptr, &window);
 
-    // let entry = setup::instance::init();
-    // let instance = setup::instance::instance(&entry);
-    //
-    // let best_dev = setup::instance::enumerate_physical_devs(&instance);
-    // let physical_exts = setup::instance::find_extensions_supported_by_pdev(&instance, best_dev);
-    // debug!("Physical extensions: ");
-    // physical_exts.iter().for_each(|ext| debug!("\t{}", ext));
-    //
-    // let device_queues = setup::instance::select_physical_device_queues(&best_dev, &instance);
-    // let logical_device =
-    //     setup::instance::make_logical_device(&instance, &best_dev, &physical_exts, &device_queues);
-    //
-    // let surface_instance = setup::instance::xcb_surface_instance(&entry, &instance);
-    // let khr_surface_instance = setup::instance::khr_surface_instance(&entry, &instance);
-    // let vk_surface = setup::instance::xcb_surface(&surface_instance, _xcb_ptr, &window);
-    //
-    // let caps = setup::instance::map_physical_device_to_surface_properties(
-    //     &khr_surface_instance,
-    //     &best_dev,
-    //     &vk_surface,
-    // );
-    // setup::instance::test_capabilities(&caps);
-    // let surface_formats =
-    //     setup::instance::find_formats_and_colorspaces(&khr_surface_instance, best_dev, &vk_surface);
-    // let surface_queues = select_presentation_queues(
-    //     &best_dev,
-    //     &vk_surface,
-    //     &device_queues,
-    //     &khr_surface_instance,
-    // );
-    //
-    // let swapchain_device = setup::instance::make_surface_device(&instance, &logical_device);
-    // let swapchain = setup::instance::make_swapchain(
-    //     &swapchain_device,
-    //     vk_surface,
-    //     &surface_formats,
-    //     &device_queues,
-    //     &caps,
-    // );
-    //
-    // let swapchain_images = setup::instance::swapchain_images(&swapchain_device, swapchain);
-    // debug!(
-    //     "Count of images provided by the swapchain: {}",
-    //     swapchain_images.len()
-    // );
-    //
-    // let swapchain_views =
-    //     setup::instance::image_views(&logical_device, &swapchain_images, surface_formats.format);
-    //
-    // debug!("Count of image views: {}", swapchain_views.len());
-
-    // debug!(
-    //     "Extents? {}x{}",
-    //     caps.current_extent.width, caps.current_extent.height
-    // );
-    // debug!("Available transforms: {:?}", caps.supported_transforms);
-    // debug!("Available image usages: {:?}", caps.supported_usage_flags);
-    // debug!(
-    //     "Available alpha values: {:?}",
-    //     caps.supported_composite_alpha
-    // );
-    // debug!("Buffers? {}-{}", caps.min_image_count, caps.max_image_count);
-    //
-    // debug!("The...instance was created?");
-    //
-    // unsafe { swapchain_device.destroy_swapchain(swapchain, None) };
-    // unsafe { khr_surface_instance.destroy_surface(vk_surface, None) };
-    // unsafe { instance.destroy_instance(None) };
-    //
     debug!("Vulkan instance destroyed...");
+}
+
+fn display_image<'a>(vulkan_context: &'a VkContext<'a>) {
+    let image_width = vulkan_context.surface_capabilities.current_extent.width;
+    let image_height = vulkan_context.surface_capabilities.current_extent.height;
+
+    let buffer_info = BufferCreateInfo::default()
+        .size((image_width * image_height * 4) as u64)
+        .usage(BufferUsageFlags::TRANSFER_SRC | BufferUsageFlags::STORAGE_BUFFER)
+        .sharing_mode(SharingMode::EXCLUSIVE);
+
+    let buffer = unsafe {
+        vulkan_context
+            .logical_device
+            .create_buffer(&buffer_info, None)
+    };
 }
