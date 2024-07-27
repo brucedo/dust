@@ -1,6 +1,6 @@
 use ash::{
     khr::swapchain,
-    vk::{BufferCreateInfo, BufferUsageFlags, SharingMode},
+    vk::{BufferCreateInfo, BufferUsageFlags, MemoryType, SharingMode},
 };
 use log::{debug, warn};
 
@@ -33,8 +33,34 @@ fn main() {
     thread::spawn(move || xcb_window::event_loop(conn, sender));
 
     let vk_context = instance::default(_xcb_ptr, &window);
+    show_physical_memory_stats(&vk_context);
 
     debug!("Vulkan instance destroyed...");
+}
+
+fn show_physical_memory_stats(vk_ctxt: &VkContext) {
+    let temp = vk_ctxt.physical_memory_properties;
+
+    for index in 0..temp.memory_type_count as usize {
+        debug!(
+            "mem_type {}: {:?}",
+            temp.memory_types[index].heap_index, temp.memory_types[index].property_flags
+        );
+    }
+
+    for index in 0..temp.memory_heap_count as usize {
+        if !temp.memory_heaps[index].flags.is_empty() {
+            debug!(
+                "Memory heap {:?}: {}",
+                temp.memory_heaps[index].flags, temp.memory_heaps[index].size
+            );
+        } else {
+            debug!(
+                "Memory heap flags empty, size {}",
+                temp.memory_heaps[index].size
+            );
+        }
+    }
 }
 
 fn display_image<'a>(vulkan_context: &'a VkContext<'a>) {

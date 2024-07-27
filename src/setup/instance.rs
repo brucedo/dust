@@ -3,10 +3,11 @@ use ash::vk::{
     CommandBufferLevel, CommandPool, CommandPoolCreateFlags, CommandPoolCreateInfo,
     ComponentSwizzle, CompositeAlphaFlagsKHR, DeviceCreateInfo, DeviceQueueCreateInfo, Format,
     Image, ImageAspectFlags, ImageCreateInfo, ImageUsageFlags, ImageView, ImageViewCreateInfo,
-    ImageViewType, InstanceCreateInfo, PhysicalDevice, PhysicalDeviceProperties,
-    PhysicalDeviceType, PresentModeKHR, QueueFamilyProperties, QueueFlags, SharingMode,
-    SurfaceCapabilitiesKHR, SurfaceFormatKHR, SurfaceKHR, SurfaceTransformFlagsKHR,
-    SwapchainCreateFlagsKHR, SwapchainCreateInfoKHR, SwapchainKHR, XcbSurfaceCreateInfoKHR,
+    ImageViewType, InstanceCreateInfo, PhysicalDevice, PhysicalDeviceMemoryProperties,
+    PhysicalDeviceProperties, PhysicalDeviceType, PresentModeKHR, QueueFamilyProperties,
+    QueueFlags, SharingMode, SurfaceCapabilitiesKHR, SurfaceFormatKHR, SurfaceKHR,
+    SurfaceTransformFlagsKHR, SwapchainCreateFlagsKHR, SwapchainCreateInfoKHR, SwapchainKHR,
+    XcbSurfaceCreateInfoKHR,
 };
 use ash::{Device, Entry, Instance};
 use core::panic;
@@ -24,6 +25,7 @@ pub struct VkContext<'a> {
     entry: ash::Entry,
     instance: ash::Instance,
     physical_device: PhysicalDevice,
+    pub physical_memory_properties: PhysicalDeviceMemoryProperties,
     physical_ext_names: Vec<String>,
     device_queue_create_info: Vec<DeviceQueueCreateInfo<'a>>,
     pub logical_device: Device,
@@ -46,6 +48,7 @@ pub fn default(xcb_ptr: *mut xcb_connection_t, xcb_window: &Window) -> VkContext
     let instance: ash::Instance = instance(&entry);
 
     let physical_device: PhysicalDevice = enumerate_physical_devs(&instance);
+    let physical_memory_properties = get_physical_memory_properties(&instance, &physical_device);
     let physical_ext_names: Vec<String> =
         find_extensions_supported_by_pdev(&instance, physical_device);
 
@@ -106,6 +109,7 @@ pub fn default(xcb_ptr: *mut xcb_connection_t, xcb_window: &Window) -> VkContext
         entry,
         instance,
         physical_device,
+        physical_memory_properties,
         physical_ext_names,
         device_queue_create_info,
         logical_device,
@@ -322,6 +326,13 @@ fn map_physical_device_to_surface_properties(
             );
         }
     }
+}
+
+fn get_physical_memory_properties(
+    instance: &Instance,
+    physical_device: &PhysicalDevice,
+) -> PhysicalDeviceMemoryProperties {
+    unsafe { instance.get_physical_device_memory_properties(*physical_device) }
 }
 
 fn find_extensions_supported_by_pdev(instance: &Instance, p_dev: PhysicalDevice) -> Vec<String> {
