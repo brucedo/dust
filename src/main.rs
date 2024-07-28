@@ -1,9 +1,13 @@
 use ash::{
     khr::swapchain,
-    vk::{BufferCreateInfo, BufferUsageFlags, MemoryType, SharingMode},
+    vk::{
+        BufferCreateInfo, BufferUsageFlags, MemoryAllocateInfo, MemoryMapFlags,
+        MemoryPropertyFlags, MemoryType, SharingMode,
+    },
 };
 use log::{debug, warn};
 
+mod dust_errors;
 mod input;
 mod setup;
 
@@ -34,6 +38,7 @@ fn main() {
 
     let vk_context = instance::default(_xcb_ptr, &window);
     show_physical_memory_stats(&vk_context);
+    display_image(&vk_context);
 
     debug!("Vulkan instance destroyed...");
 }
@@ -63,18 +68,98 @@ fn show_physical_memory_stats(vk_ctxt: &VkContext) {
     }
 }
 
-fn display_image<'a>(vulkan_context: &'a VkContext<'a>) {
-    let image_width = vulkan_context.surface_capabilities.current_extent.width;
-    let image_height = vulkan_context.surface_capabilities.current_extent.height;
+fn display_image<'a>(vk_ctxt: &'a VkContext<'a>) {
+    let image_width = vk_ctxt.surface_capabilities.current_extent.width;
+    let image_height = vk_ctxt.surface_capabilities.current_extent.height;
 
     let buffer_info = BufferCreateInfo::default()
         .size((image_width * image_height * 4) as u64)
         .usage(BufferUsageFlags::TRANSFER_SRC | BufferUsageFlags::STORAGE_BUFFER)
         .sharing_mode(SharingMode::EXCLUSIVE);
 
-    let buffer = unsafe {
-        vulkan_context
-            .logical_device
-            .create_buffer(&buffer_info, None)
+    let buffer = match unsafe { vk_ctxt.logical_device.create_buffer(&buffer_info, None) } {
+        Ok(buffer) => buffer,
+        Err(msg) => {
+            panic!("Buffer creation failed: {:?}", msg);
+        }
     };
+
+    let mem_req = unsafe {
+        vk_ctxt
+            .logical_device
+            .get_buffer_memory_requirements(buffer)
+    };
+
+    let mem_type_index = match vk_ctxt.match_memory_type(
+        mem_req.memory_type_bits,
+        &(MemoryPropertyFlags::HOST_VISIBLE
+            | MemoryPropertyFlags::HOST_COHERENT
+            | MemoryPropertyFlags::DEVICE_LOCAL),
+    ) {
+        Ok(mem_type_index) => mem_type_index,
+        Err(msg) => {
+            panic!(
+                "Could not find memory type matching requirements {:?}: {:?}",
+                mem_req.memory_type_bits, msg
+            );
+        }
+    };
+
+    let mem_alloc_info = MemoryAllocateInfo::default()
+        .allocation_size(buffer_info.size)
+        .memory_type_index(mem_type_index);
+
+    let mem_handle = match unsafe {
+        vk_ctxt
+            .logical_device
+            .allocate_memory(&mem_alloc_info, None)
+    } {
+        Ok(handle) => handle,
+        Err(msg) => {
+            panic!(
+                "Unable to allocate buffer sized {}: {:?}",
+                buffer_info.size, msg
+            );
+        }
+    };
+
+    match unsafe {
+        vk_ctxt
+            .logical_device
+            .bind_buffer_memory(buffer, mem_handle, 0)
+    } {
+        Ok(_) => {}
+        Err(msg) => {
+            panic!(
+                "Failed to bind the buffer to the allocated memory: {:?}",
+                msg
+            );
+        }
+    }
+
+    // now make the dumping array available to me
+    let void_ptr = match unsafe {
+        vk_ctxt
+            .logical_device
+            .map_memory(mem_handle, 0, buffer_info.size, MemoryMapFlags::empty())
+    } {
+        Ok(ptr) => ptr,
+        Err(msg) => {
+            panic!("Failed to map the buffer backed memory to host: {:?}", msg);
+        }
+    };
+
+    let u8_ptr = void_ptr as *mut u8;
+    let u8_buf = unsafe { std::slice::from_raw_parts_mut(u8_ptr, buffer_info.size as usize) };
+
+    for index in 0..buffer_info.size as usize {
+        u8_buf[index] = 255;
+    }
+
+    unsafe {
+        vk_ctxt.logical_device.destroy_buffer(buffer, None);
+    }
+    unsafe {
+        vk_ctxt.logical_device.free_memory(mem_handle, None);
+    }
 }

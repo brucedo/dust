@@ -3,11 +3,11 @@ use ash::vk::{
     CommandBufferLevel, CommandPool, CommandPoolCreateFlags, CommandPoolCreateInfo,
     ComponentSwizzle, CompositeAlphaFlagsKHR, DeviceCreateInfo, DeviceQueueCreateInfo, Format,
     Image, ImageAspectFlags, ImageCreateInfo, ImageUsageFlags, ImageView, ImageViewCreateInfo,
-    ImageViewType, InstanceCreateInfo, PhysicalDevice, PhysicalDeviceMemoryProperties,
-    PhysicalDeviceProperties, PhysicalDeviceType, PresentModeKHR, QueueFamilyProperties,
-    QueueFlags, SharingMode, SurfaceCapabilitiesKHR, SurfaceFormatKHR, SurfaceKHR,
-    SurfaceTransformFlagsKHR, SwapchainCreateFlagsKHR, SwapchainCreateInfoKHR, SwapchainKHR,
-    XcbSurfaceCreateInfoKHR,
+    ImageViewType, InstanceCreateInfo, MemoryPropertyFlags, PhysicalDevice,
+    PhysicalDeviceMemoryProperties, PhysicalDeviceProperties, PhysicalDeviceType, PresentModeKHR,
+    QueueFamilyProperties, QueueFlags, SharingMode, SurfaceCapabilitiesKHR, SurfaceFormatKHR,
+    SurfaceKHR, SurfaceTransformFlagsKHR, SwapchainCreateFlagsKHR, SwapchainCreateInfoKHR,
+    SwapchainKHR, XcbSurfaceCreateInfoKHR,
 };
 use ash::{Device, Entry, Instance};
 use core::panic;
@@ -18,6 +18,8 @@ use std::time::Duration;
 use xcb::ffi::xcb_connection_t;
 use xcb::x::Window;
 use xcb::Xid;
+
+use crate::dust_errors::DustError;
 
 type Index = usize;
 type Count = u32;
@@ -154,6 +156,26 @@ impl<'a> Drop for VkContext<'a> {
             self.instance.destroy_instance(None);
         };
         debug!("Vulkan objects destroyed.");
+    }
+}
+
+impl<'a> VkContext<'a> {
+    pub fn match_memory_type(
+        &self,
+        filter: u32,
+        matcher: &MemoryPropertyFlags,
+    ) -> Result<u32, DustError> {
+        debug!("Testing for memory properties {:?}", matcher);
+        for index in 0..self.physical_memory_properties.memory_type_count {
+            if (filter & 1 << index) == (1 << index)
+                && (self.physical_memory_properties.memory_types[index as usize].property_flags
+                    & *matcher)
+                    == *matcher
+            {
+                return Ok(index);
+            }
+        }
+        Err(DustError::NoMatchingMemoryType)
     }
 }
 
