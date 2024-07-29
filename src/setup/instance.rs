@@ -36,12 +36,12 @@ pub struct VkContext<'a> {
     pub surface_capabilities: SurfaceCapabilitiesKHR,
     surface_formats: SurfaceFormatKHR,
     // presentation_queues: Vec<&'a DeviceQueueCreateInfo<'a>>,
-    swapchain_device: ash::khr::swapchain::Device,
-    swapchain: SwapchainKHR,
+    pub swapchain_device: ash::khr::swapchain::Device,
+    pub swapchain: SwapchainKHR,
     swapchain_images: Vec<Image>,
     swapchain_views: Vec<ImageView>,
     pools: Vec<CommandPool>,
-    buffers: Vec<CommandBuffer>,
+    pub buffers: Vec<CommandBuffer>,
 }
 
 #[cfg(all(target_os = "linux", not(target_os = "windows")))]

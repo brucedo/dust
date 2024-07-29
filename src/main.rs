@@ -1,8 +1,9 @@
 use ash::{
     khr::swapchain,
     vk::{
-        BufferCreateInfo, BufferUsageFlags, MemoryAllocateInfo, MemoryMapFlags,
-        MemoryPropertyFlags, MemoryType, SharingMode,
+        BufferCreateInfo, BufferUsageFlags, CommandBufferResetFlags, Fence, MemoryAllocateInfo,
+        MemoryMapFlags, MemoryPropertyFlags, MemoryType, PipelineStageFlags, SharingMode,
+        SubmitInfo,
     },
 };
 use log::{debug, warn};
@@ -156,10 +157,58 @@ fn display_image<'a>(vk_ctxt: &'a VkContext<'a>) {
         u8_buf[index] = 255;
     }
 
+    // slowly edging on towards drawing...
+    let swapchain_grab_semaphore = match unsafe {
+        vk_ctxt
+            .logical_device
+            .create_semaphore(&ash::vk::SemaphoreCreateInfo::default(), None)
+    } {
+        Ok(semaphore) => semaphore,
+        Err(msg) => {
+            panic!("Failed to create semaphore: {:?}", msg);
+        }
+    };
+
+    let (swapchain_index, suboptimal) = match unsafe {
+        vk_ctxt.swapchain_device.acquire_next_image(
+            vk_ctxt.swapchain,
+            100,
+            swapchain_grab_semaphore,
+            Fence::null(),
+        )
+    } {
+        Ok(index) => index,
+        Err(msg) => {
+            panic!("Unable to acquire next swapchian image: {:?}", msg);
+        }
+    };
+
+    debug!("next swapchain image: {}", swapchain_index);
+    debug!("next image is suboptimal: {}", suboptimal);
+
+    let command_buffer = vk_ctxt.buffers.first().unwrap();
+
+    match unsafe {
+        vk_ctxt
+            .logical_device
+            .reset_command_buffer(*command_buffer, CommandBufferResetFlags::empty())
+    } {
+        Ok(_) => {}
+        Err(msg) => {
+            panic!("Command buffer reset failed: {:?}", msg);
+        }
+    };
+
+    let queue_submit_info = SubmitInfo::default()
+        .wait_semaphores(&[swapchain_grab_semaphore; 1])
+        .wait_dst_stage_mask(&[PipelineStageFlags::DRAW_INDIRECT; 1]);
+
+    // Destruction section
     unsafe {
+        vk_ctxt
+            .logical_device
+            .destroy_semaphore(swapchain_grab_semaphore, None);
         vk_ctxt.logical_device.destroy_buffer(buffer, None);
-    }
-    unsafe {
         vk_ctxt.logical_device.free_memory(mem_handle, None);
     }
 }
