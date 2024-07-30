@@ -5,9 +5,9 @@ use ash::vk::{
     Image, ImageAspectFlags, ImageCreateInfo, ImageUsageFlags, ImageView, ImageViewCreateInfo,
     ImageViewType, InstanceCreateInfo, MemoryPropertyFlags, PhysicalDevice,
     PhysicalDeviceMemoryProperties, PhysicalDeviceProperties, PhysicalDeviceType, PresentModeKHR,
-    QueueFamilyProperties, QueueFlags, SharingMode, SurfaceCapabilitiesKHR, SurfaceFormatKHR,
-    SurfaceKHR, SurfaceTransformFlagsKHR, SwapchainCreateFlagsKHR, SwapchainCreateInfoKHR,
-    SwapchainKHR, XcbSurfaceCreateInfoKHR,
+    Queue, QueueFamilyProperties, QueueFlags, SharingMode, SurfaceCapabilitiesKHR,
+    SurfaceFormatKHR, SurfaceKHR, SurfaceTransformFlagsKHR, SwapchainCreateFlagsKHR,
+    SwapchainCreateInfoKHR, SwapchainKHR, XcbSurfaceCreateInfoKHR,
 };
 use ash::{Device, Entry, Instance};
 use core::panic;
@@ -31,6 +31,7 @@ pub struct VkContext<'a> {
     physical_ext_names: Vec<String>,
     device_queue_create_info: Vec<DeviceQueueCreateInfo<'a>>,
     pub logical_device: Device,
+    pub graphics_queue: Queue,
     khr_surface_instance: ash::khr::surface::Instance,
     surface: SurfaceKHR,
     pub surface_capabilities: SurfaceCapabilitiesKHR,
@@ -65,6 +66,9 @@ pub fn default(xcb_ptr: *mut xcb_connection_t, xcb_window: &Window) -> VkContext
         &physical_ext_names,
         &device_queue_create_info,
     );
+
+    let graphics_queue: Queue =
+        get_queue(&logical_device, &device_queue_create_info.get(0).unwrap());
 
     let xcb_surface_instance: ash::khr::xcb_surface::Instance =
         ash::khr::xcb_surface::Instance::new(&entry, &instance);
@@ -115,6 +119,7 @@ pub fn default(xcb_ptr: *mut xcb_connection_t, xcb_window: &Window) -> VkContext
         physical_ext_names,
         device_queue_create_info,
         logical_device,
+        graphics_queue,
         khr_surface_instance,
         surface,
         surface_capabilities,
@@ -191,7 +196,7 @@ fn init() -> ash::Entry {
 
 #[cfg(all(target_os = "linux", not(target_os = "windows")))]
 fn instance(entry: &ash::Entry) -> ash::Instance {
-    sleep(Duration::from_secs(10));
+    // sleep(Duration::from_secs(10));
 
     debug!("Starting instance creation...");
     let app_name = CString::new("Dust for Linux").unwrap();
@@ -463,6 +468,13 @@ fn select_physical_device_queues<'a, 'b>(
         }
     }
     queue_selection
+}
+
+fn get_queue(device: &Device, reference_info: &DeviceQueueCreateInfo) -> Queue {
+    let family_index = reference_info.queue_family_index;
+    let queue_index = 0;
+
+    unsafe { device.get_device_queue(family_index, queue_index) }
 }
 
 fn select_presentation_queues<'a>(
