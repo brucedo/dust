@@ -38,8 +38,8 @@ pub struct VkContext<'a> {
     // presentation_queues: Vec<&'a DeviceQueueCreateInfo<'a>>,
     pub swapchain_device: ash::khr::swapchain::Device,
     pub swapchain: SwapchainKHR,
-    swapchain_images: Vec<Image>,
-    swapchain_views: Vec<ImageView>,
+    pub swapchain_images: Vec<Image>,
+    pub swapchain_views: Vec<ImageView>,
     pools: Vec<CommandPool>,
     pub buffers: Vec<CommandBuffer>,
 }

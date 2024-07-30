@@ -1,9 +1,10 @@
 use ash::{
     khr::swapchain,
     vk::{
-        BufferCreateInfo, BufferUsageFlags, CommandBufferResetFlags, Fence, MemoryAllocateInfo,
-        MemoryMapFlags, MemoryPropertyFlags, MemoryType, PipelineStageFlags, SharingMode,
-        SubmitInfo,
+        BufferCreateInfo, BufferImageCopy, BufferUsageFlags, CommandBufferBeginInfo,
+        CommandBufferInheritanceInfo, CommandBufferResetFlags, Extent3D, Fence, ImageAspectFlags,
+        ImageLayout, ImageSubresourceLayers, MemoryAllocateInfo, MemoryMapFlags,
+        MemoryPropertyFlags, MemoryType, Offset3D, PipelineStageFlags, SharingMode, SubmitInfo,
     },
 };
 use log::{debug, warn};
@@ -199,9 +200,50 @@ fn display_image<'a>(vk_ctxt: &'a VkContext<'a>) {
         }
     };
 
+    let dst_image = vk_ctxt
+        .swapchain_images
+        .get(swapchain_index as usize)
+        .unwrap();
+
+    let buffer_image_copy = BufferImageCopy::default()
+        .buffer_offset(0)
+        .buffer_row_length(1920)
+        .buffer_image_height(1080)
+        .image_offset(Offset3D::default().x(0).y(0).z(0))
+        .image_extent(Extent3D::default().depth(1).height(1080).width(1920))
+        .image_subresource(
+            ImageSubresourceLayers::default()
+                .mip_level(1)
+                .layer_count(1)
+                .base_array_layer(0)
+                .aspect_mask(ImageAspectFlags::COLOR),
+        );
+
+    match unsafe {
+        vk_ctxt
+            .logical_device
+            .begin_command_buffer(*command_buffer, &CommandBufferBeginInfo::default())
+    } {
+        Ok(_) => {}
+        Err(msg) => {
+            panic!("Command buffer recording failed: {:?} ", msg);
+        }
+    };
+
+    unsafe {
+        vk_ctxt.logical_device.cmd_copy_buffer_to_image(
+            *command_buffer,
+            buffer,
+            *dst_image,
+            ImageLayout::GENERAL,
+            &[buffer_image_copy; 1],
+        )
+    }
+
     let queue_submit_info = SubmitInfo::default()
         .wait_semaphores(&[swapchain_grab_semaphore; 1])
-        .wait_dst_stage_mask(&[PipelineStageFlags::DRAW_INDIRECT; 1]);
+        .wait_dst_stage_mask(&[PipelineStageFlags::TOP_OF_PIPE; 1])
+        .command_buffers(&[*command_buffer; 1]);
 
     // Destruction section
     unsafe {
