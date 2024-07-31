@@ -459,11 +459,14 @@ fn select_physical_device_queues<'a, 'b>(
         {
             debug!("Found matching queue.");
             let queue_count = u32::min(family.queue_count, 3);
+            let mut queue_priorities = Vec::with_capacity(queue_count as usize);
+            queue_priorities.fill(0.5);
             debug!("Requesting {} queues.", queue_count);
-            let mut queue_create_info =
-                DeviceQueueCreateInfo::default().queue_family_index(index as u32);
+            let mut queue_create_info = DeviceQueueCreateInfo::default()
+                .queue_family_index(index as u32)
+                .queue_priorities(&queue_priorities);
             queue_create_info.queue_count = queue_count;
-            queue_create_info.queue_priorities(vec![0.5; queue_count as usize].as_slice());
+            // queue_create_info.queue_priorities(vec![0.5; queue_count as usize].as_slice());
             queue_selection.push(queue_create_info);
         }
     }

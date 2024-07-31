@@ -1,0 +1,4 @@
+export VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation
+export VK_LOADER_LAYERS_ENABLE=*validation
+export RUST_LOG=debug
+cargo run

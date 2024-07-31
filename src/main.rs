@@ -2,9 +2,10 @@ use ash::{
     khr::swapchain,
     vk::{
         BufferCreateInfo, BufferImageCopy, BufferUsageFlags, CommandBufferBeginInfo,
-        CommandBufferInheritanceInfo, CommandBufferResetFlags, Extent3D, Fence, ImageAspectFlags,
-        ImageLayout, ImageSubresourceLayers, MemoryAllocateInfo, MemoryMapFlags,
-        MemoryPropertyFlags, MemoryType, Offset3D, PipelineStageFlags, SharingMode, SubmitInfo,
+        CommandBufferInheritanceInfo, CommandBufferResetFlags, Extent3D, Fence, FenceCreateFlags,
+        FenceCreateInfo, ImageAspectFlags, ImageLayout, ImageSubresourceLayers, MemoryAllocateInfo,
+        MemoryMapFlags, MemoryPropertyFlags, MemoryType, Offset3D, PipelineStageFlags, SharingMode,
+        SubmitInfo,
     },
 };
 use log::{debug, warn};
@@ -170,12 +171,36 @@ fn display_image<'a>(vk_ctxt: &'a VkContext<'a>) {
         }
     };
 
+    let fence_create_info = FenceCreateInfo::default().flags(FenceCreateFlags::empty());
+
+    let frame_drawn_fence = match unsafe {
+        vk_ctxt
+            .logical_device
+            .create_fence(&fence_create_info, None)
+    } {
+        Ok(fence) => fence,
+        Err(msg) => {
+            panic!("Could not create fence: {:?}", msg);
+        }
+    };
+
+    let swapchain_image_acq_fence = match unsafe {
+        vk_ctxt
+            .logical_device
+            .create_fence(&fence_create_info, None)
+    } {
+        Ok(fence) => fence,
+        Err(msg) => {
+            panic!("Could not create swapchain-grab fence: {:?}", msg);
+        }
+    };
+
     let (swapchain_index, suboptimal) = match unsafe {
         vk_ctxt.swapchain_device.acquire_next_image(
             vk_ctxt.swapchain,
             100,
             swapchain_grab_semaphore,
-            Fence::null(),
+            swapchain_image_acq_fence,
         )
     } {
         Ok(index) => index,
@@ -186,6 +211,19 @@ fn display_image<'a>(vk_ctxt: &'a VkContext<'a>) {
 
     debug!("next swapchain image: {}", swapchain_index);
     debug!("next image is suboptimal: {}", suboptimal);
+
+    match unsafe {
+        vk_ctxt
+            .logical_device
+            .wait_for_fences(&[swapchain_image_acq_fence], true, 100)
+    } {
+        Ok(_) => {}
+        Err(msg) => {
+            panic!("Waiting for swapchain fence failed: {:?}", msg);
+        }
+    };
+
+    debug!("Passed image grab wait.");
 
     let command_buffer = vk_ctxt.buffers.first().unwrap();
 
@@ -244,15 +282,15 @@ fn display_image<'a>(vk_ctxt: &'a VkContext<'a>) {
     let buffer_array = [*command_buffer; 1];
 
     let queue_submit_info = SubmitInfo::default()
-        .wait_semaphores(&semaphore_array)
-        .wait_dst_stage_mask(&[PipelineStageFlags::TOP_OF_PIPE; 1])
+        // .wait_semaphores(&semaphore_array)
+        // .wait_dst_stage_mask(&[PipelineStageFlags::TOP_OF_PIPE; 1])
         .command_buffers(&buffer_array);
 
     // match unsafe {
     //     vk_ctxt.logical_device.queue_submit(
     //         vk_ctxt.graphics_queue,
     //         &[queue_submit_info; 1],
-    //         Fence::null(),
+    //         frame_drawn_fence,
     //     )
     // } {
     //     Ok(_) => {}
@@ -261,6 +299,17 @@ fn display_image<'a>(vk_ctxt: &'a VkContext<'a>) {
     //     }
     // };
 
+    // match unsafe {
+    //     vk_ctxt
+    //         .logical_device
+    //         .wait_for_fences(&[frame_drawn_fence], true, 100)
+    // } {
+    //     Ok(_) => {}
+    //     Err(msg) => {
+    //         panic!("Waiting for frame drawn fence failed: {:?}", msg);
+    //     }
+    // }
+
     // Destruction section
     unsafe {
         vk_ctxt
@@ -268,5 +317,11 @@ fn display_image<'a>(vk_ctxt: &'a VkContext<'a>) {
             .destroy_semaphore(swapchain_grab_semaphore, None);
         // vk_ctxt.logical_device.destroy_buffer(buffer, None);
         // vk_ctxt.logical_device.free_memory(mem_handle, None);
+        vk_ctxt
+            .logical_device
+            .destroy_fence(frame_drawn_fence, None);
+        vk_ctxt
+            .logical_device
+            .destroy_fence(swapchain_image_acq_fence, None);
     }
 }
