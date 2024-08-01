@@ -7,12 +7,11 @@ type Rect = (u32, u32);
 
 use log::debug;
 use xcb::{
-    x::{self, ConfigWindow, Cw, Event, EventMask, Keycode, MapWindow, Window},
-    xinput::KeyCode,
-    xkb::{GetDeviceInfo, UseExtension, XiFeature},
+    x::{self, ConfigWindow, Cw, Event, EventMask, MapWindow, Window},
+    xkb::UseExtension,
     Connection, Extension,
 };
-use xkbcommon::xkb::{self, Keymap, Keysym};
+use xkbcommon::xkb::{self, Keymap};
 
 use crate::input::input::KeyStroke;
 
@@ -159,7 +158,10 @@ pub fn resize_window(conn: &Connection, window_id: Window, upper_left: Point, di
                 }
             }
             Err(msg) => {
-                panic!("Trying to check the update status of the geometry failed.")
+                panic!(
+                    "Trying to check the update status of the geometry failed: {:?}",
+                    msg
+                )
             }
         }
     }
@@ -256,7 +258,7 @@ pub fn interrogate_randr(conn: &Connection, window_id: Window) -> (Point, Rect) 
     }
 }
 
-pub fn event_loop(conn: Connection, sender: SyncSender<KeyStroke>) {
+pub fn event_loop(conn: Connection, _sender: SyncSender<KeyStroke>) {
     let keymap = interrogate_keymaps(&conn);
     let state = xkb::State::new(&keymap);
     loop {

@@ -7,7 +7,7 @@ use ash::vk::{
     PhysicalDeviceMemoryProperties, PhysicalDeviceProperties, PhysicalDeviceType, PresentModeKHR,
     Queue, QueueFamilyProperties, QueueFlags, SharingMode, SurfaceCapabilitiesKHR,
     SurfaceFormatKHR, SurfaceKHR, SurfaceTransformFlagsKHR, SwapchainCreateFlagsKHR,
-    SwapchainCreateInfoKHR, SwapchainKHR, XcbSurfaceCreateInfoKHR,
+    SwapchainCreateInfoKHR, SwapchainKHR, XcbSurfaceCreateInfoKHR, QUEUE_FAMILY_EXTERNAL,
 };
 use ash::{Device, Entry, Instance};
 use core::panic;
@@ -29,7 +29,15 @@ pub struct VkContext<'a> {
     physical_device: PhysicalDevice,
     pub physical_memory_properties: PhysicalDeviceMemoryProperties,
     physical_ext_names: Vec<String>,
-    device_queue_create_info: Vec<DeviceQueueCreateInfo<'a>>,
+    // device_queue_create_info: Vec<DeviceQueueCreateInfo<'a>>,
+    graphics_queues: Vec<u32>,
+    graphics_counts: Vec<u32>,
+    graphics_priorities: Vec<Vec<f32>>,
+    transfer_queues: Vec<u32>,
+    transfer_counts: Vec<u32>,
+    transfer_priorities: Vec<Vec<f32>>,
+    graphics_queue_create_infos: Vec<DeviceQueueCreateInfo<'a>>,
+    transfer_queue_create_infos: Vec<DeviceQueueCreateInfo<'a>>,
     pub logical_device: Device,
     pub graphics_queue: Queue,
     khr_surface_instance: ash::khr::surface::Instance,
@@ -56,19 +64,72 @@ pub fn default(xcb_ptr: *mut xcb_connection_t, xcb_window: &Window) -> VkContext
         find_extensions_supported_by_pdev(&instance, physical_device);
 
     let queue_family_properties =
-        unsafe { instance.get_physical_device_queue_family_properties2_len(physical_device) };
+        unsafe { instance.get_physical_device_queue_family_properties(physical_device) };
 
-    let device_queue_create_info: Vec<DeviceQueueCreateInfo> =
-        select_physical_device_queues(&physical_device, &instance);
+    let transfer_queues = select_transfer_queues(&queue_family_properties);
+    let transfer_queue_counts =
+        choose_transfer_queue_counts(&queue_family_properties, &transfer_queues);
+    let graphics_queues = select_graphics_queues(&queue_family_properties);
+    let graphics_queue_counts =
+        choose_graphics_queue_counts(&queue_family_properties, &graphics_queues);
+
+    let mut transfer_priorities = Vec::<Vec<f32>>::new();
+    for count in &transfer_queue_counts {
+        transfer_priorities.push(vec![0.5; *count as usize]);
+    }
+
+    let mut graphics_priorities = Vec::<Vec<f32>>::new();
+    for count in &graphics_queue_counts {
+        graphics_priorities.push(vec![0.5; *count as usize]);
+    }
+
+    let transfer_queue_create_infos = construct_queue_create_info(
+        &transfer_queues,
+        &transfer_queue_counts,
+        &transfer_priorities,
+    );
+
+    transfer_queue_create_infos
+        .iter()
+        .for_each(|dq| debug!("Transfer queue priorities: {:?} ", dq.p_queue_priorities));
+
+    let graphics_queue_create_infos = construct_queue_create_info(
+        &graphics_queues,
+        &graphics_queue_counts,
+        &graphics_priorities,
+    );
+
+    graphics_queue_create_infos
+        .iter()
+        .for_each(|dq| debug!("Graphics queue priorities: {:?} ", dq.p_queue_priorities));
+
+    let mut all_queue_create_info = Vec::new();
+    for queue in &transfer_queue_create_infos {
+        all_queue_create_info.push(*queue);
+    }
+    for queue in &graphics_queue_create_infos {
+        all_queue_create_info.push(*queue);
+    }
+
+    // let device_queue_create_info: Vec<DeviceQueueCreateInfo> =
+    // select_physical_device_queues(&physical_device, &instance);
+
+    // device_queue_create_info
+    //     .iter()
+    //     .for_each(|dq| debug!("Device queue priorities: {:?} ", dq.p_queue_priorities));
+    //
     let logical_device: Device = make_logical_device(
         &instance,
         &physical_device,
         &physical_ext_names,
-        &device_queue_create_info,
+        // &device_queue_create_info,
+        &all_queue_create_info,
     );
 
-    let graphics_queue: Queue =
-        get_queue(&logical_device, &device_queue_create_info.get(0).unwrap());
+    let graphics_queue: Queue = get_queue(
+        &logical_device,
+        &graphics_queue_create_infos.get(0).unwrap(),
+    );
 
     let xcb_surface_instance: ash::khr::xcb_surface::Instance =
         ash::khr::xcb_surface::Instance::new(&entry, &instance);
@@ -96,7 +157,8 @@ pub fn default(xcb_ptr: *mut xcb_connection_t, xcb_window: &Window) -> VkContext
         &swapchain_device,
         surface,
         &surface_formats,
-        &device_queue_create_info,
+        // &device_queue_create_info,
+        &graphics_queues,
         &surface_capabilities,
     );
 
@@ -105,7 +167,7 @@ pub fn default(xcb_ptr: *mut xcb_connection_t, xcb_window: &Window) -> VkContext
         image_views(&logical_device, &swapchain_images, surface_formats.format);
 
     let mut pools = Vec::new();
-    for queue_info in &device_queue_create_info {
+    for queue_info in &graphics_queue_create_infos {
         pools.push(build_pools(queue_info, &logical_device));
     }
 
@@ -117,7 +179,15 @@ pub fn default(xcb_ptr: *mut xcb_connection_t, xcb_window: &Window) -> VkContext
         physical_device,
         physical_memory_properties,
         physical_ext_names,
-        device_queue_create_info,
+        // device_queue_create_info,
+        graphics_priorities,
+        graphics_counts: graphics_queue_counts,
+        graphics_queues,
+        graphics_queue_create_infos,
+        transfer_queues,
+        transfer_counts: transfer_queue_counts,
+        transfer_priorities,
+        transfer_queue_create_infos,
         logical_device,
         graphics_queue,
         khr_surface_instance,
@@ -400,7 +470,7 @@ fn is_wanted_extension(ext_name: &str) -> bool {
 fn make_logical_device(
     instance: &Instance,
     p_dev: &PhysicalDevice,
-    exts: &Vec<String>,
+    exts: &[String],
     queue_selection: &Vec<DeviceQueueCreateInfo>,
 ) -> Device {
     // This initial copy operation is required to give the CStrings a long-lived
@@ -441,6 +511,63 @@ fn make_logical_device(
     }
 }
 
+fn select_transfer_queues(queue_families: &Vec<QueueFamilyProperties>) -> Vec<u32> {
+    let mut transfer_indices = Vec::new();
+
+    for (index, element) in queue_families.iter().enumerate() {
+        if element.queue_flags.contains(QueueFlags::TRANSFER)
+            && !element.queue_flags.contains(QueueFlags::GRAPHICS)
+        {
+            debug!("Found pure transfer queue.");
+            transfer_indices.push(index as u32);
+        }
+    }
+
+    transfer_indices
+}
+
+fn choose_transfer_queue_counts(
+    queue_families: &Vec<QueueFamilyProperties>,
+    transfer_indices: &Vec<u32>,
+) -> Vec<u32> {
+    let mut counts = Vec::new();
+
+    for index in transfer_indices {
+        let temp = queue_families.get(*index as usize).unwrap();
+        let count = std::cmp::min(5, temp.queue_count);
+        counts.push(count);
+    }
+
+    counts
+}
+
+fn select_graphics_queues(queue_families: &Vec<QueueFamilyProperties>) -> Vec<u32> {
+    let mut graphics_indices = Vec::new();
+
+    for (index, element) in queue_families.iter().enumerate() {
+        if element.queue_flags.contains(QueueFlags::GRAPHICS) {
+            debug!("Found graphics queue.");
+            graphics_indices.push(index as u32);
+        }
+    }
+
+    graphics_indices
+}
+
+fn choose_graphics_queue_counts(
+    _queue_families: &[QueueFamilyProperties],
+    queue_indices: &[u32],
+) -> Vec<u32> {
+    let mut graphics_counts = Vec::new();
+
+    for index in queue_indices {
+        // let temp = queue_families[(*index) as usize];
+        graphics_counts.push(1);
+    }
+
+    graphics_counts
+}
+
 fn select_physical_device_queues<'a, 'b>(
     device: &'a PhysicalDevice,
     instance: &'a Instance,
@@ -459,18 +586,47 @@ fn select_physical_device_queues<'a, 'b>(
         {
             debug!("Found matching queue.");
             let queue_count = u32::min(family.queue_count, 3);
-            let mut queue_priorities = Vec::with_capacity(queue_count as usize);
-            queue_priorities.fill(0.5);
+            // let mut queue_priorities = Vec::with_capacity(queue_count as usize);
+            // queue_priorities.fill(0.5);
             debug!("Requesting {} queues.", queue_count);
-            let mut queue_create_info = DeviceQueueCreateInfo::default()
-                .queue_family_index(index as u32)
-                .queue_priorities(&queue_priorities);
+            let mut queue_create_info =
+                DeviceQueueCreateInfo::default().queue_family_index(index as u32);
+            // .queue_priorities(&queue_priorities);
             queue_create_info.queue_count = queue_count;
-            // queue_create_info.queue_priorities(vec![0.5; queue_count as usize].as_slice());
+            queue_create_info.queue_priorities(vec![0.5; queue_count as usize].as_slice());
+            debug!("queue_priority: {:?}", queue_create_info.p_queue_priorities);
             queue_selection.push(queue_create_info);
         }
     }
+
     queue_selection
+        .iter()
+        .for_each(|dq| debug!("Device queue priorities: {:?} ", dq.p_queue_priorities));
+    queue_selection
+}
+
+fn construct_queue_create_info<'a>(
+    queue_indices: &Vec<u32>,
+    queue_counts: &Vec<u32>,
+    priorities: &'a Vec<Vec<f32>>,
+) -> Vec<DeviceQueueCreateInfo<'a>> {
+    let mut queue_create_infos = Vec::new();
+
+    for (iter_index, queue_index) in queue_indices.iter().enumerate() {
+        let queue_count = queue_counts.get(iter_index).unwrap();
+        let queue_priorities = priorities.get(iter_index).unwrap();
+
+        debug!("Creating queue request struct for queue_index {}; requesting {} queues at priorities {:?}", queue_index, queue_count, queue_priorities);
+        let mut queue_create_info = DeviceQueueCreateInfo::default()
+            .queue_family_index(*queue_index)
+            .queue_priorities(queue_priorities);
+        queue_create_info.queue_count = *queue_count;
+
+        debug!("queue_priority: {:?}", queue_create_info.p_queue_priorities);
+        queue_create_infos.push(queue_create_info);
+    }
+
+    queue_create_infos
 }
 
 fn get_queue(device: &Device, reference_info: &DeviceQueueCreateInfo) -> Queue {
@@ -582,14 +738,15 @@ fn make_swapchain(
     device: &ash::khr::swapchain::Device,
     surface: SurfaceKHR,
     formatting: &SurfaceFormatKHR,
-    queue_families: &[DeviceQueueCreateInfo],
+    // queue_families: &[DeviceQueueCreateInfo],
+    queue_families: &[u32],
     // queue_families: &Vec<DeviceQueueCreateInfo>,
     surface_capabilities: &SurfaceCapabilitiesKHR,
 ) -> SwapchainKHR {
-    let queue_family_indices: Vec<u32> = queue_families
-        .iter()
-        .map(|qf| qf.queue_family_index)
-        .collect();
+    // let queue_family_indices: Vec<u32> = queue_families
+    //     .iter()
+    //     .map(|qf| qf.queue_family_index)
+    //     .collect();
 
     let swapchain_info = SwapchainCreateInfoKHR::default()
         .flags(SwapchainCreateFlagsKHR::empty())
@@ -601,7 +758,8 @@ fn make_swapchain(
         .image_array_layers(1)
         .image_usage(ImageUsageFlags::TRANSFER_DST)
         .image_sharing_mode(SharingMode::EXCLUSIVE)
-        .queue_family_indices(queue_family_indices.as_slice())
+        // .queue_family_indices(queue_family_indices.as_slice())
+        .queue_family_indices(queue_families)
         .pre_transform(surface_capabilities.current_transform)
         .composite_alpha(CompositeAlphaFlagsKHR::OPAQUE)
         .present_mode(PresentModeKHR::MAILBOX)

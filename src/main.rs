@@ -8,7 +8,7 @@ use ash::{
         SubmitInfo,
     },
 };
-use log::{debug, warn};
+use log::debug;
 
 mod dust_errors;
 mod input;
@@ -36,7 +36,7 @@ fn main() {
     xcb_window::resize_window(&conn, window, upper_left, window_size);
 
     let _xcb_ptr = conn.get_raw_conn();
-    let (sender, receiver) = std::sync::mpsc::sync_channel::<KeyStroke>(16);
+    let (sender, _receiver) = std::sync::mpsc::sync_channel::<KeyStroke>(16);
     thread::spawn(move || xcb_window::event_loop(conn, sender));
 
     let vk_context = instance::default(_xcb_ptr, &window);
@@ -72,8 +72,8 @@ fn show_physical_memory_stats(vk_ctxt: &VkContext) {
 }
 
 fn display_image<'a>(vk_ctxt: &'a VkContext<'a>) {
-    let image_width = vk_ctxt.surface_capabilities.current_extent.width;
-    let image_height = vk_ctxt.surface_capabilities.current_extent.height;
+    let _image_width = vk_ctxt.surface_capabilities.current_extent.width;
+    let _image_height = vk_ctxt.surface_capabilities.current_extent.height;
 
     // let buffer_info = BufferCreateInfo::default()
     //     .size((image_width * image_height * 4) as u64)
@@ -278,10 +278,10 @@ fn display_image<'a>(vk_ctxt: &'a VkContext<'a>) {
     //     )
     // }
 
-    let semaphore_array = [swapchain_grab_semaphore; 1];
+    let _semaphore_array = [swapchain_grab_semaphore; 1];
     let buffer_array = [*command_buffer; 1];
 
-    let queue_submit_info = SubmitInfo::default()
+    let _queue_submit_info = SubmitInfo::default()
         // .wait_semaphores(&semaphore_array)
         // .wait_dst_stage_mask(&[PipelineStageFlags::TOP_OF_PIPE; 1])
         .command_buffers(&buffer_array);
