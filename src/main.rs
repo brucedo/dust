@@ -1,10 +1,26 @@
 use ash::{
-    khr::swapchain,
+    // khr::swapchain,
     vk::{
-        BufferCreateInfo, BufferImageCopy, BufferUsageFlags, CommandBufferBeginInfo,
-        CommandBufferInheritanceInfo, CommandBufferResetFlags, Extent3D, Fence, FenceCreateFlags,
-        FenceCreateInfo, ImageAspectFlags, ImageLayout, ImageSubresourceLayers, MemoryAllocateInfo,
-        MemoryMapFlags, MemoryPropertyFlags, MemoryType, Offset3D, PipelineStageFlags, SharingMode,
+        BufferCreateInfo,
+        BufferImageCopy,
+        BufferUsageFlags,
+        CommandBufferBeginInfo,
+        // CommandBufferInheritanceInfo,
+        CommandBufferResetFlags,
+        Extent3D,
+        // Fence,
+        FenceCreateFlags,
+        FenceCreateInfo,
+        ImageAspectFlags,
+        ImageLayout,
+        ImageSubresourceLayers,
+        MemoryAllocateInfo,
+        MemoryMapFlags,
+        MemoryPropertyFlags,
+        // MemoryType,
+        Offset3D,
+        // PipelineStageFlags,
+        SharingMode,
         SubmitInfo,
     },
 };
@@ -71,93 +87,93 @@ fn show_physical_memory_stats(vk_ctxt: &VkContext) {
     }
 }
 
-fn display_image<'a>(vk_ctxt: &'a VkContext<'a>) {
-    let _image_width = vk_ctxt.surface_capabilities.current_extent.width;
-    let _image_height = vk_ctxt.surface_capabilities.current_extent.height;
+fn display_image(vk_ctxt: &VkContext) {
+    let image_width = vk_ctxt.surface_capabilities.current_extent.width;
+    let image_height = vk_ctxt.surface_capabilities.current_extent.height;
 
-    // let buffer_info = BufferCreateInfo::default()
-    //     .size((image_width * image_height * 4) as u64)
-    //     .usage(BufferUsageFlags::TRANSFER_SRC | BufferUsageFlags::STORAGE_BUFFER)
-    //     .sharing_mode(SharingMode::EXCLUSIVE);
+    let buffer_info = BufferCreateInfo::default()
+        .size((image_width * image_height * 4) as u64)
+        .usage(BufferUsageFlags::TRANSFER_SRC | BufferUsageFlags::STORAGE_BUFFER)
+        .sharing_mode(SharingMode::EXCLUSIVE);
 
-    // let buffer = match unsafe { vk_ctxt.logical_device.create_buffer(&buffer_info, None) } {
-    //     Ok(buffer) => buffer,
-    //     Err(msg) => {
-    //         panic!("Buffer creation failed: {:?}", msg);
-    //     }
-    // };
+    let buffer = match unsafe { vk_ctxt.logical_device.create_buffer(&buffer_info, None) } {
+        Ok(buffer) => buffer,
+        Err(msg) => {
+            panic!("Buffer creation failed: {:?}", msg);
+        }
+    };
 
-    // let mem_req = unsafe {
-    //     vk_ctxt
-    //         .logical_device
-    //         .get_buffer_memory_requirements(buffer)
-    // };
+    let mem_req = unsafe {
+        vk_ctxt
+            .logical_device
+            .get_buffer_memory_requirements(buffer)
+    };
 
-    // let mem_type_index = match vk_ctxt.match_memory_type(
-    //     mem_req.memory_type_bits,
-    //     &(MemoryPropertyFlags::HOST_VISIBLE
-    //         | MemoryPropertyFlags::HOST_COHERENT
-    //         | MemoryPropertyFlags::DEVICE_LOCAL),
-    // ) {
-    //     Ok(mem_type_index) => mem_type_index,
-    //     Err(msg) => {
-    //         panic!(
-    //             "Could not find memory type matching requirements {:?}: {:?}",
-    //             mem_req.memory_type_bits, msg
-    //         );
-    //     }
-    // };
+    let mem_type_index = match vk_ctxt.match_memory_type(
+        mem_req.memory_type_bits,
+        &(MemoryPropertyFlags::HOST_VISIBLE
+            | MemoryPropertyFlags::HOST_COHERENT
+            | MemoryPropertyFlags::DEVICE_LOCAL),
+    ) {
+        Ok(mem_type_index) => mem_type_index,
+        Err(msg) => {
+            panic!(
+                "Could not find memory type matching requirements {:?}: {:?}",
+                mem_req.memory_type_bits, msg
+            );
+        }
+    };
 
-    // let mem_alloc_info = MemoryAllocateInfo::default()
-    //     .allocation_size(buffer_info.size)
-    //     .memory_type_index(mem_type_index);
+    let mem_alloc_info = MemoryAllocateInfo::default()
+        .allocation_size(buffer_info.size)
+        .memory_type_index(mem_type_index);
 
-    // let mem_handle = match unsafe {
-    //     vk_ctxt
-    //         .logical_device
-    //         .allocate_memory(&mem_alloc_info, None)
-    // } {
-    //     Ok(handle) => handle,
-    //     Err(msg) => {
-    //         panic!(
-    //             "Unable to allocate buffer sized {}: {:?}",
-    //             buffer_info.size, msg
-    //         );
-    //     }
-    // };
+    let mem_handle = match unsafe {
+        vk_ctxt
+            .logical_device
+            .allocate_memory(&mem_alloc_info, None)
+    } {
+        Ok(handle) => handle,
+        Err(msg) => {
+            panic!(
+                "Unable to allocate buffer sized {}: {:?}",
+                buffer_info.size, msg
+            );
+        }
+    };
 
-    // match unsafe {
-    //     vk_ctxt
-    //         .logical_device
-    //         .bind_buffer_memory(buffer, mem_handle, 0)
-    // } {
-    //     Ok(_) => {}
-    //     Err(msg) => {
-    //         panic!(
-    //             "Failed to bind the buffer to the allocated memory: {:?}",
-    //             msg
-    //         );
-    //     }
-    // }
+    match unsafe {
+        vk_ctxt
+            .logical_device
+            .bind_buffer_memory(buffer, mem_handle, 0)
+    } {
+        Ok(_) => {}
+        Err(msg) => {
+            panic!(
+                "Failed to bind the buffer to the allocated memory: {:?}",
+                msg
+            );
+        }
+    }
 
     // now make the dumping array available to me
-    // let void_ptr = match unsafe {
-    //     vk_ctxt
-    //         .logical_device
-    //         .map_memory(mem_handle, 0, buffer_info.size, MemoryMapFlags::empty())
-    // } {
-    //     Ok(ptr) => ptr,
-    //     Err(msg) => {
-    //         panic!("Failed to map the buffer backed memory to host: {:?}", msg);
-    //     }
-    // };
+    let void_ptr = match unsafe {
+        vk_ctxt
+            .logical_device
+            .map_memory(mem_handle, 0, buffer_info.size, MemoryMapFlags::empty())
+    } {
+        Ok(ptr) => ptr,
+        Err(msg) => {
+            panic!("Failed to map the buffer backed memory to host: {:?}", msg);
+        }
+    };
 
-    // let u8_ptr = void_ptr as *mut u8;
-    // let u8_buf = unsafe { std::slice::from_raw_parts_mut(u8_ptr, buffer_info.size as usize) };
-    //
-    // for index in 0..buffer_info.size as usize {
-    //     u8_buf[index] = 255;
-    // }
+    let u8_ptr = void_ptr as *mut u8;
+    let u8_buf = unsafe { std::slice::from_raw_parts_mut(u8_ptr, buffer_info.size as usize) };
+
+    for index in 0..buffer_info.size as usize {
+        u8_buf[index] = 255;
+    }
 
     // slowly edging on towards drawing...
     let swapchain_grab_semaphore = match unsafe {
@@ -238,24 +254,24 @@ fn display_image<'a>(vk_ctxt: &'a VkContext<'a>) {
         }
     };
 
-    // let dst_image = vk_ctxt
-    //     .swapchain_images
-    //     .get(swapchain_index as usize)
-    //     .unwrap();
-    //
-    // let buffer_image_copy = BufferImageCopy::default()
-    //     .buffer_offset(0)
-    //     .buffer_row_length(1920)
-    //     .buffer_image_height(1080)
-    //     .image_offset(Offset3D::default().x(0).y(0).z(0))
-    //     .image_extent(Extent3D::default().depth(1).height(1080).width(1920))
-    //     .image_subresource(
-    //         ImageSubresourceLayers::default()
-    //             .mip_level(1)
-    //             .layer_count(1)
-    //             .base_array_layer(0)
-    //             .aspect_mask(ImageAspectFlags::COLOR),
-    //     );
+    let dst_image = vk_ctxt
+        .swapchain_images
+        .get(swapchain_index as usize)
+        .unwrap();
+
+    let buffer_image_copy = BufferImageCopy::default()
+        .buffer_offset(0)
+        .buffer_row_length(1920)
+        .buffer_image_height(1080)
+        .image_offset(Offset3D::default().x(0).y(0).z(0))
+        .image_extent(Extent3D::default().depth(1).height(1080).width(1920))
+        .image_subresource(
+            ImageSubresourceLayers::default()
+                .mip_level(0)
+                .layer_count(1)
+                .base_array_layer(0)
+                .aspect_mask(ImageAspectFlags::COLOR),
+        );
 
     match unsafe {
         vk_ctxt
@@ -268,15 +284,15 @@ fn display_image<'a>(vk_ctxt: &'a VkContext<'a>) {
         }
     };
 
-    // unsafe {
-    //     vk_ctxt.logical_device.cmd_copy_buffer_to_image(
-    //         *command_buffer,
-    //         buffer,
-    //         *dst_image,
-    //         ImageLayout::GENERAL,
-    //         &[buffer_image_copy; 1],
-    //     )
-    // }
+    unsafe {
+        vk_ctxt.logical_device.cmd_copy_buffer_to_image(
+            *command_buffer,
+            buffer,
+            *dst_image,
+            ImageLayout::GENERAL,
+            &[buffer_image_copy; 1],
+        )
+    }
 
     let _semaphore_array = [swapchain_grab_semaphore; 1];
     let buffer_array = [*command_buffer; 1];
@@ -315,8 +331,8 @@ fn display_image<'a>(vk_ctxt: &'a VkContext<'a>) {
         vk_ctxt
             .logical_device
             .destroy_semaphore(swapchain_grab_semaphore, None);
-        // vk_ctxt.logical_device.destroy_buffer(buffer, None);
-        // vk_ctxt.logical_device.free_memory(mem_handle, None);
+        vk_ctxt.logical_device.destroy_buffer(buffer, None);
+        vk_ctxt.logical_device.free_memory(mem_handle, None);
         vk_ctxt
             .logical_device
             .destroy_fence(frame_drawn_fence, None);

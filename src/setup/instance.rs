@@ -1,20 +1,51 @@
 use ash::vk::{
-    ApplicationInfo, BufferCreateInfo, CommandBuffer, CommandBufferAllocateInfo,
-    CommandBufferLevel, CommandPool, CommandPoolCreateFlags, CommandPoolCreateInfo,
-    ComponentSwizzle, CompositeAlphaFlagsKHR, DeviceCreateInfo, DeviceQueueCreateInfo, Format,
-    Image, ImageAspectFlags, ImageCreateInfo, ImageUsageFlags, ImageView, ImageViewCreateInfo,
-    ImageViewType, InstanceCreateInfo, MemoryPropertyFlags, PhysicalDevice,
-    PhysicalDeviceMemoryProperties, PhysicalDeviceProperties, PhysicalDeviceType, PresentModeKHR,
-    Queue, QueueFamilyProperties, QueueFlags, SharingMode, SurfaceCapabilitiesKHR,
-    SurfaceFormatKHR, SurfaceKHR, SurfaceTransformFlagsKHR, SwapchainCreateFlagsKHR,
-    SwapchainCreateInfoKHR, SwapchainKHR, XcbSurfaceCreateInfoKHR, QUEUE_FAMILY_EXTERNAL,
+    ApplicationInfo,
+    // BufferCreateInfo,
+    CommandBuffer,
+    CommandBufferAllocateInfo,
+    CommandBufferLevel,
+    CommandPool,
+    CommandPoolCreateFlags,
+    CommandPoolCreateInfo,
+    ComponentSwizzle,
+    CompositeAlphaFlagsKHR,
+    DeviceCreateInfo,
+    DeviceQueueCreateInfo,
+    Format,
+    Image,
+    ImageAspectFlags,
+    // ImageCreateInfo,
+    ImageUsageFlags,
+    ImageView,
+    ImageViewCreateInfo,
+    ImageViewType,
+    InstanceCreateInfo,
+    MemoryPropertyFlags,
+    PhysicalDevice,
+    PhysicalDeviceMemoryProperties,
+    PhysicalDeviceProperties,
+    PhysicalDeviceType,
+    PresentModeKHR,
+    Queue,
+    QueueFamilyProperties,
+    QueueFlags,
+    SharingMode,
+    SurfaceCapabilitiesKHR,
+    SurfaceFormatKHR,
+    SurfaceKHR,
+    SurfaceTransformFlagsKHR,
+    SwapchainCreateFlagsKHR,
+    SwapchainCreateInfoKHR,
+    SwapchainKHR,
+    XcbSurfaceCreateInfoKHR,
+    // QUEUE_FAMILY_EXTERNAL,
 };
 use ash::{Device, Entry, Instance};
 use core::panic;
 use log::{debug, error};
 use std::ffi::{c_void, CStr, CString};
-use std::thread::sleep;
-use std::time::Duration;
+// use std::thread::sleep;
+// use std::time::Duration;
 use xcb::ffi::xcb_connection_t;
 use xcb::x::Window;
 use xcb::Xid;
@@ -23,7 +54,7 @@ use crate::dust_errors::DustError;
 
 type Index = usize;
 type Count = u32;
-pub struct VkContext<'a> {
+pub struct VkContext {
     entry: ash::Entry,
     instance: ash::Instance,
     physical_device: PhysicalDevice,
@@ -36,8 +67,8 @@ pub struct VkContext<'a> {
     transfer_queues: Vec<u32>,
     transfer_counts: Vec<u32>,
     transfer_priorities: Vec<Vec<f32>>,
-    graphics_queue_create_infos: Vec<DeviceQueueCreateInfo<'a>>,
-    transfer_queue_create_infos: Vec<DeviceQueueCreateInfo<'a>>,
+    // graphics_queue_create_infos: Vec<DeviceQueueCreateInfo<'a>>,
+    // transfer_queue_create_infos: Vec<DeviceQueueCreateInfo<'a>>,
     pub logical_device: Device,
     pub graphics_queue: Queue,
     khr_surface_instance: ash::khr::surface::Instance,
@@ -86,7 +117,7 @@ pub fn default(xcb_ptr: *mut xcb_connection_t, xcb_window: &Window) -> VkContext
     let transfer_queue_create_infos = construct_queue_create_info(
         &transfer_queues,
         &transfer_queue_counts,
-        &transfer_priorities,
+        transfer_priorities.as_slice(),
     );
 
     transfer_queue_create_infos
@@ -111,24 +142,16 @@ pub fn default(xcb_ptr: *mut xcb_connection_t, xcb_window: &Window) -> VkContext
         all_queue_create_info.push(*queue);
     }
 
-    // let device_queue_create_info: Vec<DeviceQueueCreateInfo> =
-    // select_physical_device_queues(&physical_device, &instance);
-
-    // device_queue_create_info
-    //     .iter()
-    //     .for_each(|dq| debug!("Device queue priorities: {:?} ", dq.p_queue_priorities));
-    //
     let logical_device: Device = make_logical_device(
         &instance,
         &physical_device,
         &physical_ext_names,
-        // &device_queue_create_info,
         &all_queue_create_info,
     );
 
     let graphics_queue: Queue = get_queue(
         &logical_device,
-        &graphics_queue_create_infos.get(0).unwrap(),
+        graphics_queues[0], // graphics_queue_create_infos.first().unwrap(),
     );
 
     let xcb_surface_instance: ash::khr::xcb_surface::Instance =
@@ -144,12 +167,16 @@ pub fn default(xcb_ptr: *mut xcb_connection_t, xcb_window: &Window) -> VkContext
     );
     let surface_formats: SurfaceFormatKHR =
         find_formats_and_colorspaces(&khr_surface_instance, physical_device, &surface);
-    // let presentation_queues: Vec<&DeviceQueueCreateInfo> = select_presentation_queues(
-    //     &physical_device,
-    //     &surface,
-    //     &device_queue_create_info,
-    //     &khr_surface_instance,
-    // );
+
+    debug!("Checking queues for presentation-worthiness.");
+    let presentation_queues: Vec<u32> = select_presentation_queues(
+        &physical_device,
+        &surface,
+        &graphics_queues,
+        &khr_surface_instance,
+    );
+    debug!("Input graphics queues: {:?}", graphics_queues);
+    debug!("Presentation worthy queues: {:?}", presentation_queues);
 
     let swapchain_device: ash::khr::swapchain::Device =
         ash::khr::swapchain::Device::new(&instance, &logical_device);
@@ -167,8 +194,8 @@ pub fn default(xcb_ptr: *mut xcb_connection_t, xcb_window: &Window) -> VkContext
         image_views(&logical_device, &swapchain_images, surface_formats.format);
 
     let mut pools = Vec::new();
-    for queue_info in &graphics_queue_create_infos {
-        pools.push(build_pools(queue_info, &logical_device));
+    for queue_family in &graphics_queues {
+        pools.push(build_pools(*queue_family, &logical_device));
     }
 
     let buffers = allocate_command_buffer(pools.first().unwrap(), &logical_device);
@@ -183,11 +210,11 @@ pub fn default(xcb_ptr: *mut xcb_connection_t, xcb_window: &Window) -> VkContext
         graphics_priorities,
         graphics_counts: graphics_queue_counts,
         graphics_queues,
-        graphics_queue_create_infos,
+        // graphics_queue_create_infos,
         transfer_queues,
         transfer_counts: transfer_queue_counts,
         transfer_priorities,
-        transfer_queue_create_infos,
+        // transfer_queue_create_infos,
         logical_device,
         graphics_queue,
         khr_surface_instance,
@@ -212,7 +239,7 @@ pub fn default() {
     panic!("No support for OSes other than Windows or Linux")
 }
 
-impl<'a> Drop for VkContext<'a> {
+impl Drop for VkContext {
     fn drop(&mut self) {
         debug!("Killing Vulkan objects.");
         unsafe {
@@ -234,7 +261,7 @@ impl<'a> Drop for VkContext<'a> {
     }
 }
 
-impl<'a> VkContext<'a> {
+impl VkContext {
     pub fn match_memory_type(
         &self,
         filter: u32,
@@ -296,14 +323,6 @@ fn instance(entry: &ash::Entry) -> ash::Instance {
         }
         Err(msg) => panic!("Instance creation failed: {}", msg),
     }
-}
-
-fn xcb_surface_instance(entry: &Entry, instance: &Instance) -> ash::khr::xcb_surface::Instance {
-    ash::khr::xcb_surface::Instance::new(entry, instance)
-}
-
-fn khr_surface_instance(entry: &Entry, instance: &Instance) -> ash::khr::surface::Instance {
-    ash::khr::surface::Instance::new(entry, instance)
 }
 
 #[cfg(all(target_os = "windows", not(target_os = "linux")))]
@@ -460,18 +479,19 @@ fn find_extensions_supported_by_pdev(instance: &Instance, p_dev: PhysicalDevice)
     extension_list
 }
 
+// Just for now, to shut clippy up, this is matches.
+// However, in the future we may want additional extensions
+// to be loaded and I don't know how well matches! is going
+// to scale across maybe a lot of branches.
 fn is_wanted_extension(ext_name: &str) -> bool {
-    match ext_name {
-        "VK_KHR_swapchain" => true,
-        _ => false,
-    }
+    matches!(ext_name, "VK_KHR_swapchain")
 }
 
 fn make_logical_device(
     instance: &Instance,
     p_dev: &PhysicalDevice,
     exts: &[String],
-    queue_selection: &Vec<DeviceQueueCreateInfo>,
+    queue_selection: &[DeviceQueueCreateInfo],
 ) -> Device {
     // This initial copy operation is required to give the CStrings a long-lived
     // place to stay.  Previous tries resulted in garbage being captured for the
@@ -480,7 +500,7 @@ fn make_logical_device(
     // because of the end of a loop scope, etc).  This meant that the raw pointers
     // we are capturing to give to Vulkan are up for grabs and are being reused
     // almost immediately - leading to the destruction of the text data.
-    let mut cstr_temp_exts: Vec<CString> = exts
+    let cstr_temp_exts: Vec<CString> = exts
         .iter()
         .map(|ext| CString::new(ext.as_str()))
         .filter(Result::is_ok)
@@ -495,8 +515,8 @@ fn make_logical_device(
     // let physical_features = setup_physical_features(instance);
     let physical_features = unsafe { instance.get_physical_device_features(*p_dev) };
 
-    let mut create_info = DeviceCreateInfo::default()
-        .queue_create_infos(queue_selection.as_slice())
+    let create_info = DeviceCreateInfo::default()
+        .queue_create_infos(queue_selection)
         .enabled_extension_names(&exts_arr)
         .enabled_features(&physical_features);
 
@@ -511,7 +531,7 @@ fn make_logical_device(
     }
 }
 
-fn select_transfer_queues(queue_families: &Vec<QueueFamilyProperties>) -> Vec<u32> {
+fn select_transfer_queues(queue_families: &[QueueFamilyProperties]) -> Vec<u32> {
     let mut transfer_indices = Vec::new();
 
     for (index, element) in queue_families.iter().enumerate() {
@@ -527,8 +547,8 @@ fn select_transfer_queues(queue_families: &Vec<QueueFamilyProperties>) -> Vec<u3
 }
 
 fn choose_transfer_queue_counts(
-    queue_families: &Vec<QueueFamilyProperties>,
-    transfer_indices: &Vec<u32>,
+    queue_families: &[QueueFamilyProperties],
+    transfer_indices: &[u32],
 ) -> Vec<u32> {
     let mut counts = Vec::new();
 
@@ -541,7 +561,7 @@ fn choose_transfer_queue_counts(
     counts
 }
 
-fn select_graphics_queues(queue_families: &Vec<QueueFamilyProperties>) -> Vec<u32> {
+fn select_graphics_queues(queue_families: &[QueueFamilyProperties]) -> Vec<u32> {
     let mut graphics_indices = Vec::new();
 
     for (index, element) in queue_families.iter().enumerate() {
@@ -560,7 +580,7 @@ fn choose_graphics_queue_counts(
 ) -> Vec<u32> {
     let mut graphics_counts = Vec::new();
 
-    for index in queue_indices {
+    for _index in queue_indices {
         // let temp = queue_families[(*index) as usize];
         graphics_counts.push(1);
     }
@@ -568,48 +588,14 @@ fn choose_graphics_queue_counts(
     graphics_counts
 }
 
-fn select_physical_device_queues<'a, 'b>(
-    device: &'a PhysicalDevice,
-    instance: &'a Instance,
-) -> Vec<DeviceQueueCreateInfo<'b>> {
-    let mut queue_selection = Vec::new();
-    let queue_families = unsafe { instance.get_physical_device_queue_family_properties(*device) };
-
-    for (index, family) in queue_families.iter().enumerate() {
-        debug!(
-            "Testing queue {}.  Properties/count: {:?}/{}",
-            index, family.queue_flags, family.queue_count
-        );
-        if family
-            .queue_flags
-            .contains(QueueFlags::TRANSFER | QueueFlags::COMPUTE | QueueFlags::GRAPHICS)
-        {
-            debug!("Found matching queue.");
-            let queue_count = u32::min(family.queue_count, 3);
-            // let mut queue_priorities = Vec::with_capacity(queue_count as usize);
-            // queue_priorities.fill(0.5);
-            debug!("Requesting {} queues.", queue_count);
-            let mut queue_create_info =
-                DeviceQueueCreateInfo::default().queue_family_index(index as u32);
-            // .queue_priorities(&queue_priorities);
-            queue_create_info.queue_count = queue_count;
-            queue_create_info.queue_priorities(vec![0.5; queue_count as usize].as_slice());
-            debug!("queue_priority: {:?}", queue_create_info.p_queue_priorities);
-            queue_selection.push(queue_create_info);
-        }
-    }
-
-    queue_selection
-        .iter()
-        .for_each(|dq| debug!("Device queue priorities: {:?} ", dq.p_queue_priorities));
-    queue_selection
-}
-
-fn construct_queue_create_info<'a>(
-    queue_indices: &Vec<u32>,
-    queue_counts: &Vec<u32>,
-    priorities: &'a Vec<Vec<f32>>,
-) -> Vec<DeviceQueueCreateInfo<'a>> {
+fn construct_queue_create_info<'a, 'b>(
+    queue_indices: &[u32],
+    queue_counts: &[u32],
+    priorities: &'a [Vec<f32>],
+) -> Vec<DeviceQueueCreateInfo<'b>>
+where
+    'a: 'b,
+{
     let mut queue_create_infos = Vec::new();
 
     for (iter_index, queue_index) in queue_indices.iter().enumerate() {
@@ -629,46 +615,42 @@ fn construct_queue_create_info<'a>(
     queue_create_infos
 }
 
-fn get_queue(device: &Device, reference_info: &DeviceQueueCreateInfo) -> Queue {
-    let family_index = reference_info.queue_family_index;
+fn get_queue(device: &Device, reference_info: u32) -> Queue {
+    // let family_index = reference_info.queue_family_index;
     let queue_index = 0;
 
-    unsafe { device.get_device_queue(family_index, queue_index) }
+    unsafe { device.get_device_queue(reference_info, queue_index) }
 }
 
 fn select_presentation_queues<'a>(
     device: &'_ PhysicalDevice,
     surface: &'_ SurfaceKHR,
-    physical_queues: &'a Vec<DeviceQueueCreateInfo>,
+    queues_to_test: &[u32],
     instance: &ash::khr::surface::Instance,
-) -> Vec<&'a DeviceQueueCreateInfo<'a>> {
+) -> Vec<u32> {
     debug!("Filtering selected queues for those that are presentation queues");
     debug!(
         "{} queues have been presented for review.",
-        physical_queues.len()
+        queues_to_test.len()
     );
-    let mut presentation_queues: Vec<&'a DeviceQueueCreateInfo> = Vec::new();
+    let mut presentation_queues = Vec::new();
 
-    for device_queue in physical_queues {
-        debug!("  Testing queue {}", device_queue.queue_family_index);
+    for queue_family in queues_to_test {
+        debug!("  Testing queue {}", queue_family);
         match unsafe {
-            instance.get_physical_device_surface_support(
-                *device,
-                device_queue.queue_family_index,
-                *surface,
-            )
+            instance.get_physical_device_surface_support(*device, *queue_family, *surface)
         } {
             Ok(true) => {
                 debug!(
                     "Queue index {} supports writing to a surface.",
-                    device_queue.queue_family_index
+                    queue_family
                 );
-                presentation_queues.push(device_queue);
+                presentation_queues.push(*queue_family);
             }
             Ok(false) => {
                 debug!(
                     "Queue index {} does not support writing to a surface.",
-                    device_queue.queue_family_index
+                    queue_family
                 )
             }
             Err(msg) => {
@@ -730,35 +712,23 @@ fn test_capabilities(surface_capabilities: &SurfaceCapabilitiesKHR) {
     }
 }
 
-fn make_surface_device(instance: &Instance, device: &Device) -> ash::khr::swapchain::Device {
-    ash::khr::swapchain::Device::new(instance, device)
-}
-
 fn make_swapchain(
     device: &ash::khr::swapchain::Device,
     surface: SurfaceKHR,
     formatting: &SurfaceFormatKHR,
-    // queue_families: &[DeviceQueueCreateInfo],
     queue_families: &[u32],
-    // queue_families: &Vec<DeviceQueueCreateInfo>,
     surface_capabilities: &SurfaceCapabilitiesKHR,
 ) -> SwapchainKHR {
-    // let queue_family_indices: Vec<u32> = queue_families
-    //     .iter()
-    //     .map(|qf| qf.queue_family_index)
-    //     .collect();
-
     let swapchain_info = SwapchainCreateInfoKHR::default()
         .flags(SwapchainCreateFlagsKHR::empty())
         .surface(surface)
-        .min_image_count(2)
+        .min_image_count(surface_capabilities.min_image_count)
         .image_format(formatting.format)
         .image_color_space(formatting.color_space)
         .image_extent(surface_capabilities.current_extent)
         .image_array_layers(1)
-        .image_usage(ImageUsageFlags::TRANSFER_DST)
+        .image_usage(ImageUsageFlags::TRANSFER_DST | ImageUsageFlags::COLOR_ATTACHMENT)
         .image_sharing_mode(SharingMode::EXCLUSIVE)
-        // .queue_family_indices(queue_family_indices.as_slice())
         .queue_family_indices(queue_families)
         .pre_transform(surface_capabilities.current_transform)
         .composite_alpha(CompositeAlphaFlagsKHR::OPAQUE)
@@ -788,11 +758,7 @@ fn swapchain_images(
     }
 }
 
-fn image_views(
-    device: &ash::Device,
-    images: &Vec<Image>,
-    surface_format: Format,
-) -> Vec<ImageView> {
+fn image_views(device: &ash::Device, images: &[Image], surface_format: Format) -> Vec<ImageView> {
     let mut views = Vec::with_capacity(images.len());
 
     for image in images {
@@ -825,10 +791,10 @@ fn image_views(
     views
 }
 
-fn build_pools<'a>(queue_info: &'a DeviceQueueCreateInfo, device: &'a ash::Device) -> CommandPool {
+fn build_pools<'a>(queue_family: u32, device: &'a ash::Device) -> CommandPool {
     let pool_create_info = CommandPoolCreateInfo::default()
         .flags(CommandPoolCreateFlags::RESET_COMMAND_BUFFER)
-        .queue_family_index(queue_info.queue_family_index);
+        .queue_family_index(queue_family);
 
     match unsafe { device.create_command_pool(&pool_create_info, None) } {
         Ok(pool) => pool,
