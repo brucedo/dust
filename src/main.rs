@@ -19,7 +19,7 @@ use ash::{
         MemoryPropertyFlags,
         // MemoryType,
         Offset3D,
-        // PipelineStageFlags,
+        PipelineStageFlags,
         SharingMode,
         SubmitInfo,
     },
@@ -291,40 +291,48 @@ fn display_image(vk_ctxt: &VkContext) {
             *dst_image,
             ImageLayout::GENERAL,
             &[buffer_image_copy; 1],
-        )
+        );
+        match vk_ctxt.logical_device.end_command_buffer(*command_buffer) {
+            Ok(_) => {}
+            Err(msg) => {
+                panic!("Failed to end command buffer: {:?}", msg);
+            }
+        }
     }
 
-    let _semaphore_array = [swapchain_grab_semaphore; 1];
+    let semaphore_array = [swapchain_grab_semaphore; 1];
     let buffer_array = [*command_buffer; 1];
 
-    let _queue_submit_info = SubmitInfo::default()
-        // .wait_semaphores(&semaphore_array)
-        // .wait_dst_stage_mask(&[PipelineStageFlags::TOP_OF_PIPE; 1])
+    let queue_submit_info = SubmitInfo::default()
+        .wait_semaphores(&semaphore_array)
+        .wait_dst_stage_mask(&[PipelineStageFlags::TOP_OF_PIPE; 1])
         .command_buffers(&buffer_array);
 
-    // match unsafe {
-    //     vk_ctxt.logical_device.queue_submit(
-    //         vk_ctxt.graphics_queue,
-    //         &[queue_submit_info; 1],
-    //         frame_drawn_fence,
-    //     )
-    // } {
-    //     Ok(_) => {}
-    //     Err(msg) => {
-    //         panic!("Queue submission failed: {:?}", msg);
-    //     }
-    // };
+    match unsafe {
+        vk_ctxt.logical_device.queue_submit(
+            vk_ctxt.graphics_queue,
+            &[queue_submit_info; 1],
+            frame_drawn_fence,
+        )
+    } {
+        Ok(_) => {}
+        Err(msg) => {
+            panic!("Queue submission failed: {:?}", msg);
+        }
+    };
 
-    // match unsafe {
-    //     vk_ctxt
-    //         .logical_device
-    //         .wait_for_fences(&[frame_drawn_fence], true, 100)
-    // } {
-    //     Ok(_) => {}
-    //     Err(msg) => {
-    //         panic!("Waiting for frame drawn fence failed: {:?}", msg);
-    //     }
-    // }
+    debug!("Waiting for frame_drawn_fence to trigger...");
+    match unsafe {
+        vk_ctxt
+            .logical_device
+            .wait_for_fences(&[frame_drawn_fence], true, 9000)
+    } {
+        Ok(_) => {}
+        Err(msg) => {
+            panic!("Waiting for frame drawn fence failed: {:?}", msg);
+        }
+    }
+    debug!("Frame_drawn_fence has triggered??");
 
     // Destruction section
     unsafe {
