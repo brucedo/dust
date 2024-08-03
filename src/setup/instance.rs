@@ -61,7 +61,7 @@ pub struct VkContext {
     pub physical_memory_properties: PhysicalDeviceMemoryProperties,
     physical_ext_names: Vec<String>,
     // device_queue_create_info: Vec<DeviceQueueCreateInfo<'a>>,
-    graphics_queues: Vec<u32>,
+    pub graphics_queues: Vec<u32>,
     graphics_counts: Vec<u32>,
     graphics_priorities: Vec<Vec<f32>>,
     transfer_queues: Vec<u32>,
@@ -96,6 +96,8 @@ pub fn default(xcb_ptr: *mut xcb_connection_t, xcb_window: &Window) -> VkContext
 
     let queue_family_properties =
         unsafe { instance.get_physical_device_queue_family_properties(physical_device) };
+
+    show_queue_family_properties(&queue_family_properties);
 
     let transfer_queues = select_transfer_queues(&queue_family_properties);
     let transfer_queue_counts =
@@ -528,6 +530,18 @@ fn make_logical_device(
                 msg
             )
         }
+    }
+}
+
+fn show_queue_family_properties(queue_families: &[QueueFamilyProperties]) {
+    for (index, queue) in queue_families.iter().enumerate() {
+        debug!("Queue Family {}", index);
+        debug!(" Flags         -> {:?}", queue.queue_flags);
+        debug!(" Count         -> {:?}", queue.queue_count);
+        debug!(
+            " Granularity   -> {:?}",
+            queue.min_image_transfer_granularity
+        );
     }
 }
 

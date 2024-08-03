@@ -1,28 +1,9 @@
-use ash::{
-    // khr::swapchain,
-    vk::{
-        BufferCreateInfo,
-        BufferImageCopy,
-        BufferUsageFlags,
-        CommandBufferBeginInfo,
-        // CommandBufferInheritanceInfo,
-        CommandBufferResetFlags,
-        Extent3D,
-        // Fence,
-        FenceCreateFlags,
-        FenceCreateInfo,
-        ImageAspectFlags,
-        ImageLayout,
-        ImageSubresourceLayers,
-        MemoryAllocateInfo,
-        MemoryMapFlags,
-        MemoryPropertyFlags,
-        // MemoryType,
-        Offset3D,
-        PipelineStageFlags,
-        SharingMode,
-        SubmitInfo,
-    },
+use ash::vk::{
+    AccessFlags, BufferCreateInfo, BufferImageCopy, BufferUsageFlags, CommandBufferBeginInfo,
+    CommandBufferResetFlags, DependencyFlags, Extent3D, FenceCreateFlags, FenceCreateInfo,
+    ImageAspectFlags, ImageLayout, ImageMemoryBarrier, ImageSubresourceLayers, MemoryAllocateInfo,
+    MemoryBarrier, MemoryMapFlags, MemoryPropertyFlags, Offset3D, PipelineStageFlags, SharingMode,
+    SubmitInfo,
 };
 use log::debug;
 
@@ -284,7 +265,31 @@ fn display_image(vk_ctxt: &VkContext) {
         }
     };
 
+    let image_barrier = ImageMemoryBarrier::default()
+        .old_layout(ImageLayout::UNDEFINED)
+        .new_layout(ImageLayout::GENERAL)
+        .src_queue_family_index(vk_ctxt.graphics_queues[0])
+        .dst_queue_family_index(vk_ctxt.graphics_queues[0])
+        .src_access_mask(AccessFlags::HOST_WRITE)
+        .dst_access_mask(AccessFlags::TRANSFER_READ)
+        .image(*dst_image);
+
+    let memory_barriers = Vec::new();
+    let mut image_barriers = Vec::new();
+    let buffer_barriers = Vec::new();
+
+    image_barriers.push(image_barrier);
+
     unsafe {
+        vk_ctxt.logical_device.cmd_pipeline_barrier(
+            *command_buffer,
+            PipelineStageFlags::HOST,
+            PipelineStageFlags::TRANSFER,
+            DependencyFlags::empty(),
+            memory_barriers.as_slice(),
+            buffer_barriers.as_slice(),
+            image_barriers.as_slice(),
+        );
         vk_ctxt.logical_device.cmd_copy_buffer_to_image(
             *command_buffer,
             buffer,
