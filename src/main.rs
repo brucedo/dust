@@ -1,9 +1,10 @@
 use ash::vk::{
     AccessFlags, BufferCreateInfo, BufferImageCopy, BufferUsageFlags, CommandBufferBeginInfo,
     CommandBufferResetFlags, DependencyFlags, Extent3D, FenceCreateFlags, FenceCreateInfo,
-    ImageAspectFlags, ImageLayout, ImageMemoryBarrier, ImageSubresourceLayers, MemoryAllocateInfo,
-    MemoryBarrier, MemoryMapFlags, MemoryPropertyFlags, Offset3D, PipelineStageFlags, SharingMode,
-    SubmitInfo,
+    ImageAspectFlags, ImageLayout, ImageMemoryBarrier, ImageSubresourceLayers,
+    ImageSubresourceRange, MemoryAllocateInfo, MemoryBarrier, MemoryMapFlags, MemoryPropertyFlags,
+    Offset3D, PipelineStageFlags, PresentInfoKHR, SemaphoreCreateInfo, SharingMode, SubmitInfo,
+    QUEUE_FAMILY_IGNORED,
 };
 use log::debug;
 
@@ -12,7 +13,10 @@ mod input;
 mod setup;
 
 use setup::{instance::VkContext, xcb_window};
-use std::thread;
+use std::{
+    thread::{self, sleep},
+    time::Duration,
+};
 use xcb::x::Window;
 
 use crate::{
@@ -168,6 +172,17 @@ fn display_image(vk_ctxt: &VkContext) {
         }
     };
 
+    let draw_complete_semaphore = match unsafe {
+        vk_ctxt
+            .logical_device
+            .create_semaphore(&SemaphoreCreateInfo::default(), None)
+    } {
+        Ok(semaphore) => semaphore,
+        Err(msg) => {
+            panic!("Failed to create draw_complete semaphore: {:?}", msg);
+        }
+    };
+
     let fence_create_info = FenceCreateInfo::default().flags(FenceCreateFlags::empty());
 
     let frame_drawn_fence = match unsafe {
@@ -240,6 +255,11 @@ fn display_image(vk_ctxt: &VkContext) {
         .get(swapchain_index as usize)
         .unwrap();
 
+    let dst_img_subresource_range = ImageSubresourceRange::default()
+        .aspect_mask(ImageAspectFlags::COLOR)
+        .layer_count(1)
+        .level_count(1);
+
     let buffer_image_copy = BufferImageCopy::default()
         .buffer_offset(0)
         .buffer_row_length(1920)
@@ -265,30 +285,42 @@ fn display_image(vk_ctxt: &VkContext) {
         }
     };
 
-    let image_barrier = ImageMemoryBarrier::default()
+    let copy_xition_image_barrier = ImageMemoryBarrier::default()
         .old_layout(ImageLayout::UNDEFINED)
         .new_layout(ImageLayout::GENERAL)
-        .src_queue_family_index(vk_ctxt.graphics_queues[0])
-        .dst_queue_family_index(vk_ctxt.graphics_queues[0])
-        .src_access_mask(AccessFlags::HOST_WRITE)
-        .dst_access_mask(AccessFlags::TRANSFER_READ)
-        .image(*dst_image);
+        .src_queue_family_index(QUEUE_FAMILY_IGNORED)
+        .dst_queue_family_index(QUEUE_FAMILY_IGNORED)
+        .src_access_mask(AccessFlags::NONE)
+        .dst_access_mask(AccessFlags::TRANSFER_WRITE)
+        .image(*dst_image)
+        .subresource_range(dst_img_subresource_range);
+
+    let presentation_transition_image_barrier = ImageMemoryBarrier::default()
+        .old_layout(ImageLayout::GENERAL)
+        .new_layout(ImageLayout::PRESENT_SRC_KHR)
+        .src_queue_family_index(QUEUE_FAMILY_IGNORED)
+        .dst_queue_family_index(QUEUE_FAMILY_IGNORED)
+        .src_access_mask(AccessFlags::TRANSFER_WRITE)
+        .image(*dst_image)
+        .subresource_range(dst_img_subresource_range);
 
     let memory_barriers = Vec::new();
-    let mut image_barriers = Vec::new();
+    let mut copy_transition_image_barriers = Vec::new();
+    let mut presentation_transition_image_barriers = Vec::new();
     let buffer_barriers = Vec::new();
 
-    image_barriers.push(image_barrier);
+    copy_transition_image_barriers.push(copy_xition_image_barrier);
+    presentation_transition_image_barriers.push(presentation_transition_image_barrier);
 
     unsafe {
         vk_ctxt.logical_device.cmd_pipeline_barrier(
             *command_buffer,
-            PipelineStageFlags::HOST,
+            PipelineStageFlags::TRANSFER,
             PipelineStageFlags::TRANSFER,
             DependencyFlags::empty(),
             memory_barriers.as_slice(),
             buffer_barriers.as_slice(),
-            image_barriers.as_slice(),
+            copy_transition_image_barriers.as_slice(),
         );
         vk_ctxt.logical_device.cmd_copy_buffer_to_image(
             *command_buffer,
@@ -296,6 +328,15 @@ fn display_image(vk_ctxt: &VkContext) {
             *dst_image,
             ImageLayout::GENERAL,
             &[buffer_image_copy; 1],
+        );
+        vk_ctxt.logical_device.cmd_pipeline_barrier(
+            *command_buffer,
+            PipelineStageFlags::TRANSFER,
+            PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+            DependencyFlags::empty(),
+            memory_barriers.as_slice(),
+            buffer_barriers.as_slice(),
+            presentation_transition_image_barriers.as_slice(),
         );
         match vk_ctxt.logical_device.end_command_buffer(*command_buffer) {
             Ok(_) => {}
@@ -306,11 +347,13 @@ fn display_image(vk_ctxt: &VkContext) {
     }
 
     let semaphore_array = [swapchain_grab_semaphore; 1];
+    let draw_semaphore_array = [draw_complete_semaphore; 1];
     let buffer_array = [*command_buffer; 1];
 
     let queue_submit_info = SubmitInfo::default()
         .wait_semaphores(&semaphore_array)
         .wait_dst_stage_mask(&[PipelineStageFlags::TOP_OF_PIPE; 1])
+        .signal_semaphores(&draw_semaphore_array)
         .command_buffers(&buffer_array);
 
     match unsafe {
@@ -323,6 +366,28 @@ fn display_image(vk_ctxt: &VkContext) {
         Ok(_) => {}
         Err(msg) => {
             panic!("Queue submission failed: {:?}", msg);
+        }
+    };
+
+    let swapchain_array = [vk_ctxt.swapchain; 1];
+    let image_index_array = [swapchain_index; 1];
+
+    let present_info = PresentInfoKHR::default()
+        .wait_semaphores(&draw_semaphore_array)
+        .swapchains(&swapchain_array)
+        .image_indices(&image_index_array);
+
+    match unsafe {
+        vk_ctxt
+            .swapchain_device
+            .queue_present(vk_ctxt.graphics_queue, &present_info)
+    } {
+        Ok(_) => {}
+        Err(msg) => {
+            panic!(
+                "Attempting to present the swapchain image failed: {:?}",
+                msg
+            );
         }
     };
 
@@ -339,11 +404,16 @@ fn display_image(vk_ctxt: &VkContext) {
     }
     debug!("Frame_drawn_fence has triggered??");
 
+    sleep(Duration::from_secs(10));
+
     // Destruction section
     unsafe {
         vk_ctxt
             .logical_device
             .destroy_semaphore(swapchain_grab_semaphore, None);
+        vk_ctxt
+            .logical_device
+            .destroy_semaphore(draw_complete_semaphore, None);
         vk_ctxt.logical_device.destroy_buffer(buffer, None);
         vk_ctxt.logical_device.free_memory(mem_handle, None);
         vk_ctxt
