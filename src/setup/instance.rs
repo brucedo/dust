@@ -636,7 +636,7 @@ fn get_queue(device: &Device, reference_info: u32) -> Queue {
     unsafe { device.get_device_queue(reference_info, queue_index) }
 }
 
-fn select_presentation_queues<'a>(
+fn select_presentation_queues(
     device: &'_ PhysicalDevice,
     surface: &'_ SurfaceKHR,
     queues_to_test: &[u32],
@@ -805,7 +805,7 @@ fn image_views(device: &ash::Device, images: &[Image], surface_format: Format) -
     views
 }
 
-fn build_pools<'a>(queue_family: u32, device: &'a ash::Device) -> CommandPool {
+fn build_pools(queue_family: u32, device: &ash::Device) -> CommandPool {
     let pool_create_info = CommandPoolCreateInfo::default()
         .flags(CommandPoolCreateFlags::RESET_COMMAND_BUFFER)
         .queue_family_index(queue_family);
@@ -861,7 +861,8 @@ fn scan(vk_entry: &Entry) {
     let mut layer_names: Vec<Option<&CStr>> = vk_layer_props
         .iter()
         .map(|prop| unsafe { CStr::from_ptr(prop.layer_name.as_ptr()) })
-        .map(|prop_name| Some(prop_name))
+        .map(Some)
+        // .map(|prop_name| Some(prop_name))
         .collect();
 
     layer_names.push(None);

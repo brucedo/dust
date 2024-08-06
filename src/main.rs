@@ -9,6 +9,7 @@ use ash::vk::{
 use log::debug;
 
 mod dust_errors;
+mod graphics;
 mod input;
 mod setup;
 
