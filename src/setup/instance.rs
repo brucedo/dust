@@ -44,8 +44,6 @@ use ash::{Device, Entry, Instance};
 use core::panic;
 use log::{debug, error};
 use std::ffi::{c_void, CStr, CString};
-// use std::thread::sleep;
-// use std::time::Duration;
 use xcb::ffi::xcb_connection_t;
 use xcb::x::Window;
 use xcb::Xid;
@@ -64,13 +62,14 @@ pub struct VkContext {
     pub graphics_queues: Vec<u32>,
     graphics_counts: Vec<u32>,
     graphics_priorities: Vec<Vec<f32>>,
-    transfer_queues: Vec<u32>,
+    pub transfer_queues: Vec<u32>,
     transfer_counts: Vec<u32>,
     transfer_priorities: Vec<Vec<f32>>,
     // graphics_queue_create_infos: Vec<DeviceQueueCreateInfo<'a>>,
     // transfer_queue_create_infos: Vec<DeviceQueueCreateInfo<'a>>,
     pub logical_device: Device,
     pub graphics_queue: Queue,
+    pub transfer_queue: Queue,
     khr_surface_instance: ash::khr::surface::Instance,
     surface: SurfaceKHR,
     pub surface_capabilities: SurfaceCapabilitiesKHR,
@@ -80,7 +79,8 @@ pub struct VkContext {
     pub swapchain: SwapchainKHR,
     pub swapchain_images: Vec<Image>,
     pub swapchain_views: Vec<ImageView>,
-    pools: Vec<CommandPool>,
+    pub graphics_queue_command_pools: Vec<CommandPool>,
+    pub transfer_queue_command_pools: Vec<CommandPool>,
     pub buffers: Vec<CommandBuffer>,
 }
 
@@ -99,22 +99,36 @@ pub fn default(xcb_ptr: *mut xcb_connection_t, xcb_window: &Window) -> VkContext
 
     show_queue_family_properties(&queue_family_properties);
 
-    let transfer_queues = select_transfer_queues(&queue_family_properties);
-    let transfer_queue_counts =
-        choose_transfer_queue_counts(&queue_family_properties, &transfer_queues);
-    let graphics_queues = select_graphics_queues(&queue_family_properties);
-    let graphics_queue_counts =
-        choose_graphics_queue_counts(&queue_family_properties, &graphics_queues);
+    let (transfer_queues, transfer_queue_counts, transfer_priorities) = fill_queue_bits(
+        &queue_family_properties,
+        5,
+        &QueueFlags::TRANSFER,
+        &QueueFlags::GRAPHICS,
+    );
 
-    let mut transfer_priorities = Vec::<Vec<f32>>::new();
-    for count in &transfer_queue_counts {
-        transfer_priorities.push(vec![0.5; *count as usize]);
-    }
+    let (graphics_queues, graphics_queue_counts, graphics_priorities) = fill_queue_bits(
+        &queue_family_properties,
+        1,
+        &QueueFlags::GRAPHICS,
+        &QueueFlags::empty(),
+    );
 
-    let mut graphics_priorities = Vec::<Vec<f32>>::new();
-    for count in &graphics_queue_counts {
-        graphics_priorities.push(vec![0.5; *count as usize]);
-    }
+    // let transfer_queues = select_transfer_queues(&queue_family_properties);
+    // let transfer_queue_counts =
+    //     choose_transfer_queue_counts(&queue_family_properties, &transfer_queues);
+    // let graphics_queues = select_graphics_queues(&queue_family_properties);
+    // let graphics_queue_counts =
+    //     choose_graphics_queue_counts(&queue_family_properties, &graphics_queues);
+    //
+    // let mut transfer_priorities = Vec::<Vec<f32>>::new();
+    // for count in &transfer_queue_counts {
+    //     transfer_priorities.push(vec![0.5; *count as usize]);
+    // }
+
+    // let mut graphics_priorities = Vec::<Vec<f32>>::new();
+    // for count in &graphics_queue_counts {
+    //     graphics_priorities.push(vec![0.5; *count as usize]);
+    // }
 
     let transfer_queue_create_infos = construct_queue_create_info(
         &transfer_queues,
@@ -156,6 +170,8 @@ pub fn default(xcb_ptr: *mut xcb_connection_t, xcb_window: &Window) -> VkContext
         graphics_queues[0], // graphics_queue_create_infos.first().unwrap(),
     );
 
+    let transfer_queue: Queue = get_queue(&logical_device, transfer_queues[0]);
+
     let xcb_surface_instance: ash::khr::xcb_surface::Instance =
         ash::khr::xcb_surface::Instance::new(&entry, &instance);
     let khr_surface_instance: ash::khr::surface::Instance =
@@ -195,12 +211,20 @@ pub fn default(xcb_ptr: *mut xcb_connection_t, xcb_window: &Window) -> VkContext
     let swapchain_views: Vec<ImageView> =
         image_views(&logical_device, &swapchain_images, surface_formats.format);
 
-    let mut pools = Vec::new();
+    let mut graphics_queue_command_pools = Vec::new();
     for queue_family in &graphics_queues {
-        pools.push(build_pools(*queue_family, &logical_device));
+        graphics_queue_command_pools.push(build_pools(*queue_family, &logical_device));
     }
 
-    let buffers = allocate_command_buffer(pools.first().unwrap(), &logical_device);
+    let mut transfer_queue_command_pools = Vec::new();
+    for queue_family in &transfer_queues {
+        transfer_queue_command_pools.push(build_pools(*queue_family, &logical_device));
+    }
+
+    let buffers = allocate_command_buffer(
+        graphics_queue_command_pools.first().unwrap(),
+        &logical_device,
+    );
 
     VkContext {
         entry,
@@ -219,6 +243,7 @@ pub fn default(xcb_ptr: *mut xcb_connection_t, xcb_window: &Window) -> VkContext
         // transfer_queue_create_infos,
         logical_device,
         graphics_queue,
+        transfer_queue,
         khr_surface_instance,
         surface,
         surface_capabilities,
@@ -228,9 +253,38 @@ pub fn default(xcb_ptr: *mut xcb_connection_t, xcb_window: &Window) -> VkContext
         swapchain,
         swapchain_images,
         swapchain_views,
-        pools,
+        graphics_queue_command_pools,
+        transfer_queue_command_pools,
         buffers,
     }
+}
+
+fn fill_queue_bits(
+    queue_family_properties: &[QueueFamilyProperties],
+    desired_queue_count: u32,
+    include_queue_types: &QueueFlags,
+    exclude_queue_types: &QueueFlags,
+) -> (Vec<u32>, Vec<u32>, Vec<Vec<f32>>) {
+    let queue_indices = select_queue_families(
+        queue_family_properties,
+        include_queue_types,
+        exclude_queue_types,
+    );
+
+    let mut counts = Vec::new();
+
+    for index in &queue_indices {
+        let temp = queue_family_properties.get(*index as usize).unwrap();
+        let count = std::cmp::min(desired_queue_count, temp.queue_count);
+        counts.push(count);
+    }
+
+    let mut queue_group_priorities = Vec::<Vec<f32>>::new();
+    for count in &counts {
+        queue_group_priorities.push(vec![0.5; *count as usize]);
+    }
+
+    (queue_indices, counts, queue_group_priorities)
 }
 
 #[cfg(all(target_os = "windows", not(target_os = "linux")))]
@@ -246,8 +300,8 @@ impl Drop for VkContext {
         debug!("Killing Vulkan objects.");
         unsafe {
             self.buffers.clear();
-            self.pools
-                .drain(0..self.pools.len())
+            self.graphics_queue_command_pools
+                .drain(0..self.graphics_queue_command_pools.len())
                 .for_each(|pool| self.logical_device.destroy_command_pool(pool, None));
             self.swapchain_views
                 .drain(0..self.swapchain_views.len())
@@ -546,11 +600,31 @@ fn show_queue_family_properties(queue_families: &[QueueFamilyProperties]) {
 }
 
 fn select_transfer_queues(queue_families: &[QueueFamilyProperties]) -> Vec<u32> {
+    select_queue_families(queue_families, &QueueFlags::TRANSFER, &QueueFlags::GRAPHICS)
+    // let mut transfer_indices = Vec::new();
+    //
+    // for (index, element) in queue_families.iter().enumerate() {
+    //     if element.queue_flags.contains(QueueFlags::TRANSFER)
+    //         && !element.queue_flags.contains(QueueFlags::GRAPHICS)
+    //     {
+    //         debug!("Found pure transfer queue.");
+    //         transfer_indices.push(index as u32);
+    //     }
+    // }
+    //
+    // transfer_indices
+}
+
+fn select_queue_families(
+    queue_families: &[QueueFamilyProperties],
+    include_types: &QueueFlags,
+    exclude_types: &QueueFlags,
+) -> Vec<u32> {
     let mut transfer_indices = Vec::new();
 
     for (index, element) in queue_families.iter().enumerate() {
-        if element.queue_flags.contains(QueueFlags::TRANSFER)
-            && !element.queue_flags.contains(QueueFlags::GRAPHICS)
+        if element.queue_flags.contains(*include_types)
+            && !element.queue_flags.contains(*exclude_types)
         {
             debug!("Found pure transfer queue.");
             transfer_indices.push(index as u32);
@@ -576,16 +650,17 @@ fn choose_transfer_queue_counts(
 }
 
 fn select_graphics_queues(queue_families: &[QueueFamilyProperties]) -> Vec<u32> {
-    let mut graphics_indices = Vec::new();
-
-    for (index, element) in queue_families.iter().enumerate() {
-        if element.queue_flags.contains(QueueFlags::GRAPHICS) {
-            debug!("Found graphics queue.");
-            graphics_indices.push(index as u32);
-        }
-    }
-
-    graphics_indices
+    select_queue_families(queue_families, &QueueFlags::TRANSFER, &QueueFlags::empty())
+    // let mut graphics_indices = Vec::new();
+    //
+    // for (index, element) in queue_families.iter().enumerate() {
+    //     if element.queue_flags.contains(QueueFlags::GRAPHICS) {
+    //         debug!("Found graphics queue.");
+    //         graphics_indices.push(index as u32);
+    //     }
+    // }
+    //
+    // graphics_indices
 }
 
 fn choose_graphics_queue_counts(

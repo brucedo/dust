@@ -1,16 +1,19 @@
-use std::{array, mem::size_of, usize};
+use std::usize;
 
 use crate::dust_errors::DustError;
 use ash::vk::{
-    Buffer, BufferCreateFlags, BufferCreateInfo, BufferUsageFlags, DeviceMemory,
-    MemoryAllocateInfo, MemoryMapFlags, MemoryPropertyFlags, PhysicalDeviceMemoryProperties,
-    SharingMode,
+    AccessFlags, Buffer, BufferCopy, BufferCreateFlags, BufferCreateInfo, BufferMemoryBarrier,
+    BufferUsageFlags, CommandBuffer, CommandBufferAllocateInfo, CommandBufferBeginInfo,
+    CommandBufferLevel, CommandBufferUsageFlags, DependencyFlags, DeviceMemory, FenceCreateFlags,
+    FenceCreateInfo, MemoryAllocateInfo, MemoryMapFlags, MemoryPropertyFlags,
+    PhysicalDeviceMemoryProperties, PipelineStageFlags, SharingMode, SubmitInfo,
+    QUEUE_FAMILY_IGNORED,
 };
 use log::debug;
 
 use crate::setup::instance::VkContext;
 
-pub fn copy_to_buffer<T>(data: &[T], ctxt: &VkContext) -> Buffer
+pub fn copy_to_buffer<T>(data: &[T], ctxt: &VkContext, usage: BufferUsageFlags) -> Buffer
 where
     T: Sized + Copy + Clone,
 {
@@ -47,11 +50,114 @@ where
 
     t_buf.copy_from_slice(data);
 
+    let perm_buffer = make_buffer(ctxt, size_in_bytes, usage | BufferUsageFlags::TRANSFER_DST);
+    let _perm_handle = back_buffer_with_memory(
+        ctxt,
+        &perm_buffer,
+        size_in_bytes,
+        &MemoryPropertyFlags::DEVICE_LOCAL,
+    );
+
+    let copy_region: [BufferCopy; 1] = [BufferCopy::default()
+        .size(size_in_bytes)
+        .src_offset(0)
+        .dst_offset(0)];
+
+    // let cmd_buffer = *ctxt.buffers.first().unwrap();
+    let cmd_buffer_alloc_info = CommandBufferAllocateInfo::default()
+        .level(CommandBufferLevel::PRIMARY)
+        .command_pool(*ctxt.transfer_queue_command_pools.first().unwrap())
+        .command_buffer_count(1);
+
+    let cmd_buffer = match unsafe {
+        ctxt.logical_device
+            .allocate_command_buffers(&cmd_buffer_alloc_info)
+    } {
+        Ok(buffer) => buffer,
+        Err(msg) => {
+            panic!("Failed to allocate buffer from transfer pool: {:?}", msg);
+        }
+    };
+
+    let begin_info = CommandBufferBeginInfo::default().flags(CommandBufferUsageFlags::empty());
+    let buffer_write_barrier = BufferMemoryBarrier::default()
+        .src_access_mask(AccessFlags::TRANSFER_WRITE)
+        .dst_access_mask(AccessFlags::MEMORY_WRITE | AccessFlags::MEMORY_READ)
+        .dst_queue_family_index(QUEUE_FAMILY_IGNORED)
+        .src_queue_family_index(QUEUE_FAMILY_IGNORED)
+        .size(size_in_bytes)
+        .buffer(perm_buffer)
+        .offset(0);
+    let fence = match unsafe {
+        ctxt.logical_device.create_fence(
+            &FenceCreateInfo::default().flags(FenceCreateFlags::empty()),
+            None,
+        )
+    } {
+        Ok(fence) => fence,
+        Err(msg) => {
+            panic!("Fence creation failed: {:?}", msg);
+        }
+    };
+
     unsafe {
-        ctxt.logical_device.destroy_buffer(transfer_buffer, None);
+        match ctxt
+            .logical_device
+            .begin_command_buffer(*cmd_buffer.first().unwrap(), &begin_info)
+        {
+            Ok(_) => {}
+            Err(msg) => {
+                panic!("Failed to begin buffer: {:?}", msg);
+            }
+        }
+        ctxt.logical_device.cmd_copy_buffer(
+            *cmd_buffer.first().unwrap(),
+            transfer_buffer,
+            perm_buffer,
+            &copy_region,
+        );
+        ctxt.logical_device.cmd_pipeline_barrier(
+            *cmd_buffer.first().unwrap(),
+            PipelineStageFlags::TRANSFER,
+            PipelineStageFlags::ALL_COMMANDS,
+            DependencyFlags::empty(),
+            &[],
+            &[buffer_write_barrier],
+            &[],
+        );
+        match ctxt
+            .logical_device
+            .end_command_buffer(*cmd_buffer.first().unwrap())
+        {
+            Ok(_) => {}
+            Err(msg) => {
+                panic!("Ending command buffer for transfer failed: {:?}", msg);
+            }
+        }
     }
 
-    transfer_buffer
+    let commands_to_run = &cmd_buffer[0..1];
+    let submit_info = SubmitInfo::default()
+        .command_buffers(commands_to_run)
+        .wait_semaphores(&[])
+        .wait_dst_stage_mask(&[]);
+
+    match unsafe {
+        ctxt.logical_device
+            .queue_submit(ctxt.transfer_queue, &[submit_info], fence)
+    } {
+        Ok(_) => {}
+        Err(msg) => {
+            panic!("Could not submit transfer queue for execution: {:?}", msg);
+        }
+    };
+
+    unsafe {
+        ctxt.logical_device.destroy_buffer(transfer_buffer, None);
+        ctxt.logical_device.free_memory(mem_handle, None);
+        ctxt.logical_device.destroy_fence(fence, None);
+    }
+    perm_buffer
 }
 
 fn back_buffer_with_memory(
@@ -108,7 +214,7 @@ fn make_buffer(ctxt: &VkContext, buffer_size: u64, flags: BufferUsageFlags) -> B
         .sharing_mode(SharingMode::EXCLUSIVE)
         .flags(BufferCreateFlags::empty());
 
-    let transfer_buffer = match unsafe {
+    match unsafe {
         ctxt.logical_device
             .create_buffer(&transfer_buffer_info, None)
     } {
@@ -116,9 +222,7 @@ fn make_buffer(ctxt: &VkContext, buffer_size: u64, flags: BufferUsageFlags) -> B
         Err(msg) => {
             panic!("Transfer buffer creation failed: {:?}", msg);
         }
-    };
-
-    transfer_buffer
+    }
 }
 
 pub fn match_memory_type(
