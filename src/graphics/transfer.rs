@@ -63,7 +63,6 @@ where
         .src_offset(0)
         .dst_offset(0)];
 
-    // let cmd_buffer = *ctxt.buffers.first().unwrap();
     let cmd_buffer_alloc_info = CommandBufferAllocateInfo::default()
         .level(CommandBufferLevel::PRIMARY)
         .command_pool(*ctxt.transfer_queue_command_pools.first().unwrap())
@@ -142,15 +141,24 @@ where
         .wait_semaphores(&[])
         .wait_dst_stage_mask(&[]);
 
-    match unsafe {
-        ctxt.logical_device
+    unsafe {
+        match ctxt
+            .logical_device
             .queue_submit(ctxt.transfer_queue, &[submit_info], fence)
-    } {
-        Ok(_) => {}
-        Err(msg) => {
-            panic!("Could not submit transfer queue for execution: {:?}", msg);
+        {
+            Ok(_) => {}
+            Err(msg) => {
+                panic!("Could not submit transfer queue for execution: {:?}", msg);
+            }
+        };
+
+        match ctxt.logical_device.wait_for_fences(&[fence], true, 10000) {
+            Ok(_) => {}
+            Err(msg) => {
+                panic!("Fence wait failed: {:?}", msg);
+            }
         }
-    };
+    }
 
     unsafe {
         ctxt.logical_device.destroy_buffer(transfer_buffer, None);
