@@ -5,13 +5,43 @@ use ash::vk::{
     AccessFlags, Buffer, BufferCopy, BufferCreateFlags, BufferCreateInfo, BufferMemoryBarrier,
     BufferUsageFlags, CommandBuffer, CommandBufferAllocateInfo, CommandBufferBeginInfo,
     CommandBufferLevel, CommandBufferUsageFlags, DependencyFlags, DeviceMemory, FenceCreateFlags,
-    FenceCreateInfo, MemoryAllocateInfo, MemoryMapFlags, MemoryPropertyFlags,
+    FenceCreateInfo, ImageCreateInfo, MemoryAllocateInfo, MemoryMapFlags, MemoryPropertyFlags,
     PhysicalDeviceMemoryProperties, PipelineStageFlags, SharingMode, SubmitInfo,
     QUEUE_FAMILY_IGNORED,
 };
 use log::debug;
 
 use crate::setup::instance::VkContext;
+
+pub fn copy_to_image<T>(data: &[T], ctxt: &VkContext, image_props: &ImageCreateInfo) {
+    let image_target = match unsafe { ctxt.logical_device.create_image(image_props, None) } {
+        Ok(image) => image,
+        Err(msg) => {
+            panic!("Failed to create image: {:?}", image_props);
+        }
+    };
+
+    let memory_reqs = unsafe {
+        ctxt.logical_device
+            .get_image_memory_requirements(image_target)
+    };
+
+    let transfer_buffer = make_buffer(
+        ctxt,
+        memory_reqs.size,
+        BufferUsageFlags::TRANSFER_SRC | BufferUsageFlags::TRANSFER_DST,
+    );
+
+    // {
+    //     Ok(reqs) => reqs,
+    //     Err(msg) => {
+    //         panic!(
+    //             "Failed to retrieve memory requirements for image: {:?}",
+    //             msg
+    //         );
+    //     }
+    // };
+}
 
 pub fn copy_to_buffer<T>(data: &[T], ctxt: &VkContext, usage: BufferUsageFlags) -> Buffer
 where

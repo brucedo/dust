@@ -113,6 +113,10 @@ pub fn default(xcb_ptr: *mut xcb_connection_t, xcb_window: &Window) -> VkContext
         &QueueFlags::empty(),
     );
 
+    debug!("Graphics queue indices: {:?}", graphics_queues);
+    debug!("Graphics queue counts: {:?}", graphics_queue_counts);
+    debug!("Graphics queue priorities: {:?}", graphics_priorities);
+
     // let transfer_queues = select_transfer_queues(&queue_family_properties);
     // let transfer_queue_counts =
     //     choose_transfer_queue_counts(&queue_family_properties, &transfer_queues);
@@ -265,6 +269,10 @@ fn fill_queue_bits(
     include_queue_types: &QueueFlags,
     exclude_queue_types: &QueueFlags,
 ) -> (Vec<u32>, Vec<u32>, Vec<Vec<f32>>) {
+    debug!(
+        "Selecting {} queues of type {:?}, excluding {:?}",
+        desired_queue_count, include_queue_types, exclude_queue_types
+    );
     let queue_indices = select_queue_families(
         queue_family_properties,
         include_queue_types,
@@ -300,6 +308,9 @@ impl Drop for VkContext {
         debug!("Killing Vulkan objects.");
         unsafe {
             self.buffers.clear();
+            self.transfer_queue_command_pools
+                .drain(0..self.transfer_queue_command_pools.len())
+                .for_each(|pool| self.logical_device.destroy_command_pool(pool, None));
             self.graphics_queue_command_pools
                 .drain(0..self.graphics_queue_command_pools.len())
                 .for_each(|pool| self.logical_device.destroy_command_pool(pool, None));
@@ -622,9 +633,16 @@ fn select_queue_families(
 ) -> Vec<u32> {
     let mut transfer_indices = Vec::new();
 
+    debug!(
+        "Attempting to select queues including family type {:?}, excluding {:?}",
+        include_types, exclude_types
+    );
+
     for (index, element) in queue_families.iter().enumerate() {
-        if element.queue_flags.contains(*include_types)
-            && !element.queue_flags.contains(*exclude_types)
+        if element.queue_flags & *include_types == *include_types
+            && element.queue_flags & *exclude_types == QueueFlags::empty()
+        // if element.queue_flags.contains(*include_types)
+        //     && !element.queue_flags.contains(*exclude_types)
         {
             debug!("Found pure transfer queue.");
             transfer_indices.push(index as u32);
