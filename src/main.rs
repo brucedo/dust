@@ -1,11 +1,13 @@
 use ash::vk::{
     AccessFlags, BufferCreateInfo, BufferImageCopy, BufferUsageFlags, CommandBufferBeginInfo,
-    CommandBufferResetFlags, DependencyFlags, Extent3D, FenceCreateFlags, FenceCreateInfo,
-    ImageAspectFlags, ImageLayout, ImageMemoryBarrier, ImageSubresourceLayers,
-    ImageSubresourceRange, MemoryAllocateInfo, MemoryBarrier, MemoryMapFlags, MemoryPropertyFlags,
-    Offset3D, PipelineStageFlags, PresentInfoKHR, SemaphoreCreateInfo, SharingMode, SubmitInfo,
-    QUEUE_FAMILY_IGNORED,
+    CommandBufferResetFlags, DependencyFlags, Extent3D, FenceCreateFlags, FenceCreateInfo, Format,
+    Image, ImageAspectFlags, ImageCreateFlags, ImageCreateInfo, ImageLayout, ImageMemoryBarrier,
+    ImageSubresourceLayers, ImageSubresourceRange, ImageTiling, ImageType, ImageUsageFlags,
+    MemoryAllocateInfo, MemoryBarrier, MemoryMapFlags, MemoryPropertyFlags, Offset3D,
+    PipelineStageFlags, PresentInfoKHR, SampleCountFlags, SemaphoreCreateInfo, SharingMode,
+    SubmitInfo, QUEUE_FAMILY_IGNORED,
 };
+use graphics::transfer;
 use log::debug;
 
 mod dust_errors;
@@ -43,7 +45,8 @@ fn main() {
 
     let vk_context = instance::default(_xcb_ptr, &window);
     show_physical_memory_stats(&vk_context);
-    display_image(&vk_context);
+    // display_image(&vk_context);
+    display_gradient(&vk_context);
 
     debug!("Vulkan instance destroyed...");
 }
@@ -71,6 +74,62 @@ fn show_physical_memory_stats(vk_ctxt: &VkContext) {
             );
         }
     }
+}
+
+fn display_gradient(ctxt: &VkContext) {
+    let gradient_src = load_gradient(ctxt);
+}
+
+fn load_gradient(ctxt: &VkContext) -> Image {
+    let image_width = ctxt.surface_capabilities.current_extent.width;
+    let image_height = ctxt.surface_capabilities.current_extent.height;
+
+    // Just assume RGBA here - 4 bytes per pixel.
+    let pixel_stride = 4;
+    let buffer_size_in_bytes = image_width * image_height * pixel_stride;
+
+    let mut host_buffer: Vec<u8> = Vec::with_capacity(buffer_size_in_bytes as usize);
+
+    for row_index in 0..image_height {
+        let row_fraction = (row_index as f32 / image_height as f32).clamp(0.0, 1.0) * 255.0;
+        for col_index in 0..image_width {
+            let red_index =
+                (row_index * (image_width * pixel_stride) + (col_index * pixel_stride)) as usize;
+            let blue_index = red_index + 1;
+            let green_index = red_index + 2;
+            let alpha_index = red_index + 3;
+
+            host_buffer[red_index] =
+                ((col_index as f32 / image_width as f32).clamp(0.0, 1.0) * 255.0) as u8;
+            host_buffer[green_index] = row_fraction as u8;
+            host_buffer[blue_index] = (host_buffer[red_index] + host_buffer[green_index]) / 2;
+            host_buffer[alpha_index] = 255;
+        }
+    }
+
+    let target_image = &ImageCreateInfo::default()
+        .initial_layout(ImageLayout::TRANSFER_SRC_OPTIMAL)
+        .sharing_mode(SharingMode::EXCLUSIVE)
+        .image_type(ImageType::TYPE_2D)
+        .array_layers(1)
+        .format(Format::R8G8B8A8_SRGB)
+        .extent(
+            Extent3D::default()
+                .height(image_height)
+                .width(image_width)
+                .depth(1),
+        )
+        .mip_levels(1)
+        .samples(SampleCountFlags::TYPE_1)
+        .flags(ImageCreateFlags::empty())
+        .usage(
+            ImageUsageFlags::TRANSFER_SRC
+                | ImageUsageFlags::TRANSFER_DST
+                | ImageUsageFlags::COLOR_ATTACHMENT,
+        )
+        .tiling(ImageTiling::OPTIMAL);
+
+    transfer::copy_to_image(&host_buffer, ctxt, &target_image)
 }
 
 fn display_image(vk_ctxt: &VkContext) {
