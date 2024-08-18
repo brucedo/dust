@@ -2,18 +2,21 @@ use std::usize;
 
 use crate::dust_errors::DustError;
 use ash::vk::{
-    AccessFlags, Buffer, BufferCopy, BufferCreateFlags, BufferCreateInfo, BufferMemoryBarrier,
-    BufferUsageFlags, CommandBuffer, CommandBufferAllocateInfo, CommandBufferBeginInfo,
+    AccessFlags, Buffer, BufferCopy, BufferCreateFlags, BufferCreateInfo, BufferImageCopy,
+    BufferMemoryBarrier, BufferUsageFlags, CommandBufferAllocateInfo, CommandBufferBeginInfo,
     CommandBufferLevel, CommandBufferUsageFlags, DependencyFlags, DeviceMemory, FenceCreateFlags,
-    FenceCreateInfo, ImageCreateInfo, MemoryAllocateInfo, MemoryMapFlags, MemoryPropertyFlags,
-    PhysicalDeviceMemoryProperties, PipelineStageFlags, SharingMode, SubmitInfo,
-    QUEUE_FAMILY_IGNORED,
+    FenceCreateInfo, ImageAspectFlags, ImageCreateInfo, ImageSubresource, MemoryAllocateInfo,
+    MemoryMapFlags, MemoryPropertyFlags, PhysicalDeviceMemoryProperties, PipelineStageFlags,
+    SharingMode, SubmitInfo, QUEUE_FAMILY_IGNORED,
 };
 use log::debug;
 
 use crate::setup::instance::VkContext;
 
-pub fn copy_to_image<T>(data: &[T], ctxt: &VkContext, image_props: &ImageCreateInfo) {
+pub fn copy_to_image<T>(data: &[T], ctxt: &VkContext, image_props: &ImageCreateInfo)
+where
+    T: Sized + Clone + Copy,
+{
     let image_target = match unsafe { ctxt.logical_device.create_image(image_props, None) } {
         Ok(image) => image,
         Err(msg) => {
@@ -21,26 +24,21 @@ pub fn copy_to_image<T>(data: &[T], ctxt: &VkContext, image_props: &ImageCreateI
         }
     };
 
-    let memory_reqs = unsafe {
-        ctxt.logical_device
-            .get_image_memory_requirements(image_target)
-    };
+    let (transfer_buffer, memory_handle) = make_buffer_and_copy(data, ctxt);
 
-    let transfer_buffer = make_buffer(
-        ctxt,
-        memory_reqs.size,
-        BufferUsageFlags::TRANSFER_SRC | BufferUsageFlags::TRANSFER_DST,
-    );
+    let image_subresource = ash::vk::ImageSubresourceLayers::default()
+        .mip_level(0)
+        .aspect_mask(ImageAspectFlags::COLOR)
+        .base_array_layer(0)
+        .layer_count(1);
 
-    // {
-    //     Ok(reqs) => reqs,
-    //     Err(msg) => {
-    //         panic!(
-    //             "Failed to retrieve memory requirements for image: {:?}",
-    //             msg
-    //         );
-    //     }
-    // };
+    let buffer_image_copy = BufferImageCopy::default()
+        .image_offset(ash::vk::Offset3D { x: 0, y: 0, z: 0 })
+        .image_extent(image_props.extent)
+        .buffer_offset(0)
+        .buffer_row_length(image_props.extent.width)
+        .image_subresource(image_subresource)
+        .buffer_image_height(buffer_image_height);
 }
 
 pub fn copy_to_buffer<T>(data: &[T], ctxt: &VkContext, usage: BufferUsageFlags) -> Buffer
@@ -49,36 +47,7 @@ where
 {
     let size_in_bytes = std::mem::size_of_val(data) as u64;
 
-    let transfer_buffer = make_buffer(
-        ctxt,
-        size_in_bytes,
-        BufferUsageFlags::TRANSFER_SRC | BufferUsageFlags::TRANSFER_DST,
-    );
-
-    let mem_handle = back_buffer_with_memory(
-        ctxt,
-        &transfer_buffer,
-        size_in_bytes,
-        &(MemoryPropertyFlags::HOST_VISIBLE
-            | MemoryPropertyFlags::HOST_COHERENT
-            | MemoryPropertyFlags::DEVICE_LOCAL),
-    );
-
-    let void_ptr = match unsafe {
-        ctxt.logical_device
-            .map_memory(mem_handle, 0, size_in_bytes, MemoryMapFlags::empty())
-    } {
-        Ok(ptr) => ptr,
-        Err(msg) => {
-            panic!("Failed to map the buffer backed memory to host: {:?}", msg);
-        }
-    };
-
-    let t_ptr = void_ptr as *mut T;
-    // let u8_ptr = void_ptr as *mut u8;
-    let t_buf = unsafe { std::slice::from_raw_parts_mut(t_ptr, size_in_bytes as usize) };
-
-    t_buf.copy_from_slice(data);
+    let (transfer_buffer, mem_handle) = make_buffer_and_copy(data, ctxt);
 
     let perm_buffer = make_buffer(ctxt, size_in_bytes, usage | BufferUsageFlags::TRANSFER_DST);
     let _perm_handle = back_buffer_with_memory(
@@ -196,6 +165,46 @@ where
         ctxt.logical_device.destroy_fence(fence, None);
     }
     perm_buffer
+}
+
+fn make_buffer_and_copy<T>(data: &[T], ctxt: &VkContext) -> (Buffer, DeviceMemory)
+where
+    T: Sized + Copy + Clone,
+{
+    let size_in_bytes = std::mem::size_of_val(data) as u64;
+
+    let transfer_buffer = make_buffer(
+        ctxt,
+        size_in_bytes,
+        BufferUsageFlags::TRANSFER_SRC | BufferUsageFlags::TRANSFER_DST,
+    );
+
+    let mem_handle = back_buffer_with_memory(
+        ctxt,
+        &transfer_buffer,
+        size_in_bytes,
+        &(MemoryPropertyFlags::HOST_VISIBLE
+            | MemoryPropertyFlags::HOST_COHERENT
+            | MemoryPropertyFlags::DEVICE_LOCAL),
+    );
+
+    let void_ptr = match unsafe {
+        ctxt.logical_device
+            .map_memory(mem_handle, 0, size_in_bytes, MemoryMapFlags::empty())
+    } {
+        Ok(ptr) => ptr,
+        Err(msg) => {
+            panic!("Failed to map the buffer backed memory to host: {:?}", msg);
+        }
+    };
+
+    let t_ptr = void_ptr as *mut T;
+    // let u8_ptr = void_ptr as *mut u8;
+    let t_buf = unsafe { std::slice::from_raw_parts_mut(t_ptr, size_in_bytes as usize) };
+
+    t_buf.copy_from_slice(data);
+
+    (transfer_buffer, mem_handle)
 }
 
 fn back_buffer_with_memory(
