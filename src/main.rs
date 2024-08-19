@@ -1,11 +1,12 @@
 use ash::vk::{
-    AccessFlags, BufferCreateInfo, BufferImageCopy, BufferUsageFlags, CommandBufferBeginInfo,
-    CommandBufferResetFlags, DependencyFlags, Extent3D, FenceCreateFlags, FenceCreateInfo, Format,
-    Image, ImageAspectFlags, ImageCreateFlags, ImageCreateInfo, ImageLayout, ImageMemoryBarrier,
-    ImageSubresourceLayers, ImageSubresourceRange, ImageTiling, ImageType, ImageUsageFlags,
-    MemoryAllocateInfo, MemoryBarrier, MemoryMapFlags, MemoryPropertyFlags, Offset3D,
-    PipelineStageFlags, PresentInfoKHR, SampleCountFlags, SemaphoreCreateInfo, SharingMode,
-    SubmitInfo, QUEUE_FAMILY_IGNORED,
+    AccessFlags, BufferCreateInfo, BufferImageCopy, BufferUsageFlags, CommandBufferAllocateInfo,
+    CommandBufferBeginInfo, CommandBufferLevel, CommandBufferResetFlags, CommandBufferUsageFlags,
+    DependencyFlags, Extent3D, FenceCreateFlags, FenceCreateInfo, Format, Image, ImageAspectFlags,
+    ImageCreateFlags, ImageCreateInfo, ImageLayout, ImageMemoryBarrier, ImageSubresourceLayers,
+    ImageSubresourceRange, ImageTiling, ImageType, ImageUsageFlags, MemoryAllocateInfo,
+    MemoryBarrier, MemoryMapFlags, MemoryPropertyFlags, Offset3D, PipelineStageFlags,
+    PresentInfoKHR, SampleCountFlags, SemaphoreCreateInfo, SharingMode, SubmitInfo,
+    QUEUE_FAMILY_IGNORED,
 };
 use graphics::image::DustImage;
 use graphics::transfer;
@@ -84,6 +85,34 @@ fn display_gradient(ctxt: &VkContext) {
     // unsafe {
     //     ctxt.logical_device.destroy_image(gradient_src, None);
     // }
+    let next_frame_target = 
+    let buffer = match unsafe {
+        ctxt.logical_device.allocate_command_buffers(
+            &CommandBufferAllocateInfo::default()
+                .command_pool(*ctxt.graphics_queue_command_pools.first().unwrap())
+                .command_buffer_count(1)
+                .level(CommandBufferLevel::PRIMARY),
+        )
+    } {
+        Ok(buffer) => buffer,
+        Err(msg) => {
+            panic!("Unable to allocate command buffer: {:?}", msg);
+        }
+    };
+
+    match unsafe {
+        ctxt.logical_device.begin_command_buffer(
+            *buffer.first().unwrap(),
+            &CommandBufferBeginInfo::default().flags(CommandBufferUsageFlags::ONE_TIME_SUBMIT),
+        )
+    } {
+        Ok(_) => {}
+        Err(msg) => {
+            panic!("Unable to begin command buffer: {:?}", msg);
+        }
+    };
+
+    
 }
 
 fn load_gradient(ctxt: &VkContext) -> DustImage {

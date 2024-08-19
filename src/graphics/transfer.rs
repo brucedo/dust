@@ -30,7 +30,7 @@ where
     let image_target = match unsafe { ctxt.logical_device.create_image(image_props, None) } {
         Ok(image) => image,
         Err(msg) => {
-            panic!("Failed to create image: {:?}", image_props);
+            panic!("Failed to create image: {:?}", msg);
         }
     };
 
