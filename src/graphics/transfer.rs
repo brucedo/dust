@@ -14,7 +14,14 @@ use log::debug;
 
 use crate::setup::instance::VkContext;
 
-pub fn copy_to_image<T>(data: &[T], ctxt: &VkContext, image_props: &ImageCreateInfo) -> Image
+use super::image::DustImage;
+
+pub fn copy_to_image<T>(
+    data: &[T],
+    ctxt: &VkContext,
+    image_props: &ImageCreateInfo,
+    target_layout: ImageLayout,
+) -> DustImage
 where
     T: Sized + Clone + Copy,
 {
@@ -72,7 +79,7 @@ where
         .src_queue_family_index(QUEUE_FAMILY_IGNORED)
         .dst_queue_family_index(QUEUE_FAMILY_IGNORED)
         .old_layout(ImageLayout::TRANSFER_DST_OPTIMAL)
-        .new_layout(image_props.initial_layout)
+        .new_layout(target_layout)
         .src_access_mask(AccessFlags::TRANSFER_WRITE)
         .dst_access_mask(AccessFlags::TRANSFER_READ)
         .image(image_target)
@@ -122,7 +129,7 @@ where
         ctxt.logical_device.cmd_pipeline_barrier(
             cmd_buffer,
             PipelineStageFlags::TRANSFER,
-            PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+            PipelineStageFlags::TRANSFER,
             DependencyFlags::empty(),
             &[],
             &[],
@@ -145,7 +152,8 @@ where
         ctxt.logical_device.destroy_buffer(transfer_buffer, None);
     }
 
-    image_target
+    image_target;
+    crate::graphics::image::new(image_target, device_memory, ctxt.logical_device.clone())
 }
 
 pub fn copy_to_buffer<T>(data: &[T], ctxt: &VkContext, usage: BufferUsageFlags) -> Buffer

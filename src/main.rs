@@ -7,6 +7,7 @@ use ash::vk::{
     PipelineStageFlags, PresentInfoKHR, SampleCountFlags, SemaphoreCreateInfo, SharingMode,
     SubmitInfo, QUEUE_FAMILY_IGNORED,
 };
+use graphics::image::DustImage;
 use graphics::transfer;
 use log::debug;
 
@@ -77,38 +78,57 @@ fn show_physical_memory_stats(vk_ctxt: &VkContext) {
 }
 
 fn display_gradient(ctxt: &VkContext) {
+    debug!("Creating gradient source image...");
     let gradient_src = load_gradient(ctxt);
+
+    // unsafe {
+    //     ctxt.logical_device.destroy_image(gradient_src, None);
+    // }
 }
 
-fn load_gradient(ctxt: &VkContext) -> Image {
+fn load_gradient(ctxt: &VkContext) -> DustImage {
     let image_width = ctxt.surface_capabilities.current_extent.width;
     let image_height = ctxt.surface_capabilities.current_extent.height;
+
+    let horizontal_pixel_incr = 255.0 / image_width as f32;
+    let vertical_pixel_incr = 255.0 / image_height as f32;
+
+    debug!("Image width: {}", image_width);
+    debug!("Image height: {}", image_height);
 
     // Just assume RGBA here - 4 bytes per pixel.
     let pixel_stride = 4;
     let buffer_size_in_bytes = image_width * image_height * pixel_stride;
 
-    let mut host_buffer: Vec<u8> = Vec::with_capacity(buffer_size_in_bytes as usize);
+    let mut host_buffer: Vec<u8> = vec![0; buffer_size_in_bytes as usize];
+
+    let mut red_pixel_value: u8;
+    let mut green_pixel_value: u8;
+    let mut blue_pixel_value: u8;
 
     for row_index in 0..image_height {
-        let row_fraction = (row_index as f32 / image_height as f32).clamp(0.0, 1.0) * 255.0;
+        green_pixel_value = (vertical_pixel_incr * row_index as f32).floor() as u8;
         for col_index in 0..image_width {
             let red_index =
                 (row_index * (image_width * pixel_stride) + (col_index * pixel_stride)) as usize;
-            let blue_index = red_index + 1;
-            let green_index = red_index + 2;
+            let green_index = red_index + 1;
+            let blue_index = red_index + 2;
             let alpha_index = red_index + 3;
 
-            host_buffer[red_index] =
-                ((col_index as f32 / image_width as f32).clamp(0.0, 1.0) * 255.0) as u8;
-            host_buffer[green_index] = row_fraction as u8;
-            host_buffer[blue_index] = (host_buffer[red_index] + host_buffer[green_index]) / 2;
+            red_pixel_value = (horizontal_pixel_incr * col_index as f32).floor() as u8;
+            blue_pixel_value =
+                ((row_index * col_index) as f32 / (image_width * image_height) as f32 * 255.0)
+                    .floor() as u8;
+
+            host_buffer[red_index] = red_pixel_value;
+            host_buffer[green_index] = green_pixel_value;
+            host_buffer[blue_index] = blue_pixel_value;
             host_buffer[alpha_index] = 255;
         }
     }
 
     let target_image = &ImageCreateInfo::default()
-        .initial_layout(ImageLayout::TRANSFER_SRC_OPTIMAL)
+        .initial_layout(ImageLayout::UNDEFINED)
         .sharing_mode(SharingMode::EXCLUSIVE)
         .image_type(ImageType::TYPE_2D)
         .array_layers(1)
@@ -129,7 +149,12 @@ fn load_gradient(ctxt: &VkContext) -> Image {
         )
         .tiling(ImageTiling::OPTIMAL);
 
-    transfer::copy_to_image(&host_buffer, ctxt, &target_image)
+    transfer::copy_to_image(
+        &host_buffer,
+        ctxt,
+        &target_image,
+        ImageLayout::TRANSFER_SRC_OPTIMAL,
+    )
 }
 
 fn display_image(vk_ctxt: &VkContext) {

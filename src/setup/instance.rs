@@ -44,6 +44,7 @@ use ash::{Device, Entry, Instance};
 use core::panic;
 use log::{debug, error};
 use std::ffi::{c_void, CStr, CString};
+use std::rc::Rc;
 use xcb::ffi::xcb_connection_t;
 use xcb::x::Window;
 use xcb::Xid;
@@ -67,7 +68,7 @@ pub struct VkContext {
     transfer_priorities: Vec<Vec<f32>>,
     // graphics_queue_create_infos: Vec<DeviceQueueCreateInfo<'a>>,
     // transfer_queue_create_infos: Vec<DeviceQueueCreateInfo<'a>>,
-    pub logical_device: Device,
+    pub logical_device: Rc<Device>,
     pub graphics_queue: Queue,
     pub transfer_queue: Queue,
     khr_surface_instance: ash::khr::surface::Instance,
@@ -245,7 +246,7 @@ pub fn default(xcb_ptr: *mut xcb_connection_t, xcb_window: &Window) -> VkContext
         transfer_counts: transfer_queue_counts,
         transfer_priorities,
         // transfer_queue_create_infos,
-        logical_device,
+        logical_device: Rc::new(logical_device),
         graphics_queue,
         transfer_queue,
         khr_surface_instance,
