@@ -85,7 +85,7 @@ fn display_gradient(ctxt: &VkContext) {
     // unsafe {
     //     ctxt.logical_device.destroy_image(gradient_src, None);
     // }
-    let next_frame_target = 
+    // let next_frame_target =
     let buffer = match unsafe {
         ctxt.logical_device.allocate_command_buffers(
             &CommandBufferAllocateInfo::default()
@@ -111,8 +111,6 @@ fn display_gradient(ctxt: &VkContext) {
             panic!("Unable to begin command buffer: {:?}", msg);
         }
     };
-
-    
 }
 
 fn load_gradient(ctxt: &VkContext) -> DustImage {

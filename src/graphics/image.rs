@@ -1,4 +1,5 @@
 use std::rc::Rc;
+use std::sync::Arc;
 
 use ash::{
     vk::{DeviceMemory, Image},

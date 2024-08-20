@@ -45,6 +45,7 @@ use core::panic;
 use log::{debug, error};
 use std::ffi::{c_void, CStr, CString};
 use std::rc::Rc;
+use std::sync::Arc;
 use xcb::ffi::xcb_connection_t;
 use xcb::x::Window;
 use xcb::Xid;
@@ -68,7 +69,7 @@ pub struct VkContext {
     transfer_priorities: Vec<Vec<f32>>,
     // graphics_queue_create_infos: Vec<DeviceQueueCreateInfo<'a>>,
     // transfer_queue_create_infos: Vec<DeviceQueueCreateInfo<'a>>,
-    pub logical_device: Rc<Device>,
+    pub logical_device: Arc<Device>,
     pub graphics_queue: Queue,
     pub transfer_queue: Queue,
     khr_surface_instance: ash::khr::surface::Instance,
@@ -76,8 +77,8 @@ pub struct VkContext {
     pub surface_capabilities: SurfaceCapabilitiesKHR,
     surface_formats: SurfaceFormatKHR,
     // presentation_queues: Vec<&'a DeviceQueueCreateInfo<'a>>,
-    pub swapchain_device: ash::khr::swapchain::Device,
-    pub swapchain: SwapchainKHR,
+    // pub swapchain_device: ash::khr::swapchain::Device,
+    // pub swapchain: SwapchainKHR,
     pub swapchain_images: Vec<Image>,
     pub swapchain_views: Vec<ImageView>,
     pub graphics_queue_command_pools: Vec<CommandPool>,
@@ -87,6 +88,8 @@ pub struct VkContext {
 
 #[cfg(all(target_os = "linux", not(target_os = "windows")))]
 pub fn default(xcb_ptr: *mut xcb_connection_t, xcb_window: &Window) -> VkContext {
+    use crate::graphics;
+
     let entry: ash::Entry = init();
     let instance: ash::Instance = instance(&entry);
 
@@ -163,12 +166,12 @@ pub fn default(xcb_ptr: *mut xcb_connection_t, xcb_window: &Window) -> VkContext
         all_queue_create_info.push(*queue);
     }
 
-    let logical_device: Device = make_logical_device(
+    let logical_device: Arc<Device> = Arc::new(make_logical_device(
         &instance,
         &physical_device,
         &physical_ext_names,
         &all_queue_create_info,
-    );
+    ));
 
     let graphics_queue: Queue = get_queue(
         &logical_device,
@@ -231,6 +234,8 @@ pub fn default(xcb_ptr: *mut xcb_connection_t, xcb_window: &Window) -> VkContext
         &logical_device,
     );
 
+    graphics::swapchain::init(logical_device.clone(), swapchain, swapchain_device);
+
     VkContext {
         entry,
         instance,
@@ -246,7 +251,7 @@ pub fn default(xcb_ptr: *mut xcb_connection_t, xcb_window: &Window) -> VkContext
         transfer_counts: transfer_queue_counts,
         transfer_priorities,
         // transfer_queue_create_infos,
-        logical_device: Rc::new(logical_device),
+        logical_device,
         graphics_queue,
         transfer_queue,
         khr_surface_instance,
@@ -254,8 +259,8 @@ pub fn default(xcb_ptr: *mut xcb_connection_t, xcb_window: &Window) -> VkContext
         surface_capabilities,
         surface_formats,
         // presentation_queues,
-        swapchain_device,
-        swapchain,
+        // swapchain_device,
+        // swapchain,
         swapchain_images,
         swapchain_views,
         graphics_queue_command_pools,
@@ -318,8 +323,8 @@ impl Drop for VkContext {
             self.swapchain_views
                 .drain(0..self.swapchain_views.len())
                 .for_each(|view| self.logical_device.destroy_image_view(view, None));
-            self.swapchain_device
-                .destroy_swapchain(self.swapchain, None);
+            // self.swapchain_device
+            // .destroy_swapchain(self.swapchain, None);
             self.khr_surface_instance
                 .destroy_surface(self.surface, None);
             self.logical_device.destroy_device(None);
