@@ -1,12 +1,5 @@
 use ash::vk::{
-    AccessFlags, BufferCreateInfo, BufferImageCopy, BufferUsageFlags, CommandBufferAllocateInfo,
-    CommandBufferBeginInfo, CommandBufferLevel, CommandBufferResetFlags, CommandBufferUsageFlags,
-    DependencyFlags, Extent3D, FenceCreateFlags, FenceCreateInfo, Format, Image, ImageAspectFlags,
-    ImageCreateFlags, ImageCreateInfo, ImageLayout, ImageMemoryBarrier, ImageSubresourceLayers,
-    ImageSubresourceRange, ImageTiling, ImageType, ImageUsageFlags, MemoryAllocateInfo,
-    MemoryBarrier, MemoryMapFlags, MemoryPropertyFlags, Offset3D, PipelineStageFlags,
-    PresentInfoKHR, SampleCountFlags, SemaphoreCreateInfo, SharingMode, SubmitInfo,
-    QUEUE_FAMILY_IGNORED,
+    AccessFlags, BufferCreateInfo, BufferImageCopy, BufferUsageFlags, CommandBufferAllocateInfo, CommandBufferBeginInfo, CommandBufferLevel, CommandBufferResetFlags, CommandBufferUsageFlags, DependencyFlags, Extent3D, Fence, FenceCreateFlags, FenceCreateInfo, Format, Image, ImageAspectFlags, ImageCopy, ImageCreateFlags, ImageCreateInfo, ImageLayout, ImageMemoryBarrier, ImageSubresourceLayers, ImageSubresourceRange, ImageTiling, ImageType, ImageUsageFlags, MemoryAllocateInfo, MemoryBarrier, MemoryMapFlags, MemoryPropertyFlags, Offset3D, PipelineStageFlags, PresentInfoKHR, SampleCountFlags, Semaphore, SemaphoreCreateFlags, SemaphoreCreateInfo, SharingMode, SubmitInfo, QUEUE_FAMILY_IGNORED
 };
 use graphics::image::DustImage;
 use graphics::transfer;
@@ -82,10 +75,16 @@ fn display_gradient(ctxt: &VkContext) {
     debug!("Creating gradient source image...");
     let gradient_src = load_gradient(ctxt);
 
-    // unsafe {
-    //     ctxt.logical_device.destroy_image(gradient_src, None);
-    // }
-    // let next_frame_target =
+    let make_semaphore = SemaphoreCreateInfo::default();
+    let signal_previous_draw_complete = match unsafe {ctxt.logical_device.create_semaphore(&make_semaphore, None)} {
+        Ok(semaphore) => semaphore, 
+        Err(msg) => {panic!("Failed to create new semaphore: {:?}", msg); }
+    };
+
+    let (swapchain_image_index, _suboptimal) = 
+        graphics::swapchain::next_swapchain_image(signal_previous_draw_complete, Fence::null());
+    let swapchain_image = ctxt.swapchain_images.get(swapchain_image_index as usize).unwrap();
+
     let buffer = match unsafe {
         ctxt.logical_device.allocate_command_buffers(
             &CommandBufferAllocateInfo::default()
@@ -111,6 +110,96 @@ fn display_gradient(ctxt: &VkContext) {
             panic!("Unable to begin command buffer: {:?}", msg);
         }
     };
+
+    let src_subresource = ImageSubresourceLayers::default()
+        .aspect_mask(ImageAspectFlags::COLOR)
+        .base_array_layer(0)
+        .layer_count(1)
+        .mip_level(0);
+    let dst_subresource = src_subresource.clone();
+
+    let image_to_image_info = ImageCopy::default()
+        .src_offset(Offset3D::default().x(0).y(0).z(0))
+        .dst_offset(Offset3D::default().x(0).y(0).z(0))
+        .src_subresource(src_subresource)
+        .dst_subresource(dst_subresource);
+
+    let transfer_barrier = ImageMemoryBarrier::default()
+        .dst_queue_family_index(QUEUE_FAMILY_IGNORED)
+        .src_queue_family_index(QUEUE_FAMILY_IGNORED)
+        .old_layout(ImageLayout::UNDEFINED)
+        .new_layout(ImageLayout::TRANSFER_DST_OPTIMAL)
+        .src_access_mask(AccessFlags::NONE)
+        .dst_access_mask(AccessFlags::TRANSFER_WRITE)
+        .subresource_range(ImageSubresourceRange::default()
+            .aspect_mask(ImageAspectFlags::COLOR)
+            .level_count(1)
+            .base_array_layer(0)
+            .base_mip_level(0)
+            .layer_count(1)
+        )
+        .image(*swapchain_image);
+
+    let presentation_barrier = ImageMemoryBarrier::default()
+        .dst_queue_family_index(QUEUE_FAMILY_IGNORED)
+        .src_queue_family_index(QUEUE_FAMILY_IGNORED)
+        .old_layout(ImageLayout::UNDEFINED)
+        .new_layout(ImageLayout::PRESENT_SRC_KHR)
+        .src_access_mask(AccessFlags::TRANSFER_WRITE)
+        .dst_access_mask(AccessFlags::COLOR_ATTACHMENT_READ)
+        .subresource_range(ImageSubresourceRange::default()
+            .aspect_mask(ImageAspectFlags::COLOR)
+            .level_count(1)
+            .base_array_layer(0)
+            .base_mip_level(0)
+            .layer_count(1)
+        )
+        .image(*swapchain_image);
+
+    let mem_barriers = vec![];
+    let buffer_barriers = vec![];
+    let copy_to_barriers = vec![transfer_barrier];
+    let presentation_barriers = vec![presentation_barrier];
+
+    unsafe {
+        ctxt.logical_device.cmd_pipeline_barrier(
+            *buffer.first().unwrap(), 
+            PipelineStageFlags::TOP_OF_PIPE, 
+            PipelineStageFlags::TRANSFER, 
+            DependencyFlags::empty(), 
+            &mem_barriers, 
+            &buffer_barriers, 
+            &copy_to_barriers
+        );
+        ctxt.logical_device.cmd_copy_image(*buffer.first().unwrap(), 
+            gradient_src.image, 
+            ImageLayout::TRANSFER_SRC_OPTIMAL, 
+            *swapchain_image, 
+            ImageLayout::TRANSFER_DST_OPTIMAL, 
+            &[image_to_image_info]);
+
+        ctxt.logical_device.cmd_pipeline_barrier(
+            *buffer.first().unwrap(), 
+            PipelineStageFlags::TRANSFER, 
+            PipelineStageFlags::BOTTOM_OF_PIPE, 
+            DependencyFlags::empty(), 
+            &mem_barriers, 
+            &buffer_barriers, 
+            &presentation_barriers);
+
+        ctxt.logical_device.end_command_buffer(*buffer.first().unwrap());
+    }
+
+    let submit_info = SubmitInfo::default()
+        .wait_semaphores(wait_semaphores)
+
+    ctxt.logical_device.queue_submit(ctxt.graphics_queue, submits, fence)
+
+
+    // ** DESTRUCTION ** //
+    unsafe {
+        ctxt.logical_device.destroy_semaphore(signal_previous_draw_complete, None);
+    }
 }
 
 fn load_gradient(ctxt: &VkContext) -> DustImage {
@@ -319,20 +408,10 @@ fn display_image(vk_ctxt: &VkContext) {
         }
     };
 
-    let (swapchain_index, suboptimal) = match unsafe {
-        vk_ctxt.swapchain_device.acquire_next_image(
-            vk_ctxt.swapchain,
-            100,
-            swapchain_grab_semaphore,
-            swapchain_image_acq_fence,
-        )
-    } {
-        Ok(index) => index,
-        Err(msg) => {
-            panic!("Unable to acquire next swapchian image: {:?}", msg);
-        }
-    };
-
+    let (swapchain_index, suboptimal) = graphics::swapchain::next_swapchain_image(
+        swapchain_grab_semaphore,
+        swapchain_image_acq_fence,
+    );
     debug!("next swapchain image: {}", swapchain_index);
     debug!("next image is suboptimal: {}", suboptimal);
 
@@ -364,7 +443,7 @@ fn display_image(vk_ctxt: &VkContext) {
 
     let dst_image = vk_ctxt
         .swapchain_images
-        .get(swapchain_index as usize)
+        .get(swapchain_index )
         .unwrap();
 
     let dst_img_subresource_range = ImageSubresourceRange::default()
@@ -481,19 +560,24 @@ fn display_image(vk_ctxt: &VkContext) {
         }
     };
 
-    let swapchain_array = [vk_ctxt.swapchain; 1];
-    let image_index_array = [swapchain_index; 1];
+    // let swapchain_array = [vk_ctxt.swapchain; 1];
+    // let image_index_array = [swapchain_index; 1];
+    //
+    // let present_info = PresentInfoKHR::default()
+    //     .wait_semaphores(&draw_semaphore_array)
+    //     .swapchains(&swapchain_array)
+    //     .image_indices(&image_index_array);
 
-    let present_info = PresentInfoKHR::default()
-        .wait_semaphores(&draw_semaphore_array)
-        .swapchains(&swapchain_array)
-        .image_indices(&image_index_array);
-
-    match unsafe {
-        vk_ctxt
-            .swapchain_device
-            .queue_present(vk_ctxt.graphics_queue, &present_info)
-    } {
+    match 
+        graphics::swapchain::present_swapchain_image(
+            swapchain_index as u32,
+            &vk_ctxt.graphics_queue,
+            &draw_semaphore_array,
+        )
+        // vk_ctxt
+        //         .swapchain_device
+        //         .queue_present(vk_ctxt.graphics_queue, &present_info)
+    {
         Ok(_) => {}
         Err(msg) => {
             panic!(

@@ -152,7 +152,6 @@ where
         ctxt.logical_device.destroy_buffer(transfer_buffer, None);
     }
 
-    image_target;
     crate::graphics::image::new(image_target, device_memory, ctxt.logical_device.clone())
 }
 

@@ -234,7 +234,7 @@ pub fn default(xcb_ptr: *mut xcb_connection_t, xcb_window: &Window) -> VkContext
         &logical_device,
     );
 
-    graphics::swapchain::init(logical_device.clone(), swapchain, swapchain_device);
+    graphics::swapchain::init(swapchain, swapchain_device);
 
     VkContext {
         entry,
@@ -325,6 +325,7 @@ impl Drop for VkContext {
                 .for_each(|view| self.logical_device.destroy_image_view(view, None));
             // self.swapchain_device
             // .destroy_swapchain(self.swapchain, None);
+            crate::graphics::swapchain::destroy();
             self.khr_surface_instance
                 .destroy_surface(self.surface, None);
             self.logical_device.destroy_device(None);

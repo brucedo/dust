@@ -9,10 +9,10 @@ use ash::{
 pub struct DustImage {
     pub image: Image,
     memory: DeviceMemory,
-    logical_device: Rc<Device>,
+    logical_device: Arc<Device>,
 }
 
-pub fn new(image: Image, memory: DeviceMemory, logical_device: Rc<Device>) -> DustImage {
+pub fn new(image: Image, memory: DeviceMemory, logical_device: Arc<Device>) -> DustImage {
     DustImage {
         image,
         memory,
