@@ -42,6 +42,7 @@ fn main() {
     show_physical_memory_stats(&vk_context);
     // display_image(&vk_context);
     display_gradient(&vk_context);
+    sleep(Duration::from_secs(10));
 
     debug!("Vulkan instance destroyed...");
 }
@@ -121,7 +122,9 @@ fn display_gradient(ctxt: &VkContext) {
         .src_offset(Offset3D::default().x(0).y(0).z(0))
         .dst_offset(Offset3D::default().x(0).y(0).z(0))
         .src_subresource(src_subresource)
-        .dst_subresource(src_subresource);
+        .dst_subresource(src_subresource)
+        .extent(Extent3D::default().width(1920).height(1080).depth(1))
+    ;
 
     let transfer_barrier = ImageMemoryBarrier::default()
         .dst_queue_family_index(QUEUE_FAMILY_IGNORED)
@@ -180,7 +183,7 @@ fn display_gradient(ctxt: &VkContext) {
         ctxt.logical_device.cmd_pipeline_barrier(
             *buffer.first().unwrap(), 
             PipelineStageFlags::TRANSFER, 
-            PipelineStageFlags::BOTTOM_OF_PIPE, 
+            PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT, 
             DependencyFlags::empty(), 
             &mem_barriers, 
             &buffer_barriers, 

@@ -194,6 +194,8 @@ pub fn default(xcb_ptr: *mut xcb_connection_t, xcb_window: &Window) -> VkContext
     let surface_formats: SurfaceFormatKHR =
         find_formats_and_colorspaces(&khr_surface_instance, physical_device, &surface);
 
+    debug!("Selected color format: {:?}", surface_formats.format);
+
     debug!("Checking queues for presentation-worthiness.");
     let presentation_queues: Vec<u32> = select_presentation_queues(
         &physical_device,
