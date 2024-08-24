@@ -1,5 +1,3 @@
-use std::usize;
-
 use crate::dust_errors::DustError;
 use ash::vk::{
     AccessFlags, Buffer, BufferCopy, BufferCreateFlags, BufferCreateInfo, BufferImageCopy,

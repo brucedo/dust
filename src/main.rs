@@ -1,7 +1,7 @@
 use ash::vk::{
     AccessFlags, BufferCreateInfo, BufferImageCopy, BufferUsageFlags, CommandBufferAllocateInfo, CommandBufferBeginInfo, CommandBufferLevel, CommandBufferResetFlags, CommandBufferUsageFlags, DependencyFlags, Extent3D, Fence, FenceCreateFlags, FenceCreateInfo, Format, Image, ImageAspectFlags, ImageCopy, ImageCreateFlags, ImageCreateInfo, ImageLayout, ImageMemoryBarrier, ImageSubresourceLayers, ImageSubresourceRange, ImageTiling, ImageType, ImageUsageFlags, MemoryAllocateInfo, MemoryBarrier, MemoryMapFlags, MemoryPropertyFlags, Offset3D, PipelineStageFlags, PresentInfoKHR, SampleCountFlags, Semaphore, SemaphoreCreateFlags, SemaphoreCreateInfo, SharingMode, SubmitInfo, QUEUE_FAMILY_IGNORED
 };
-use graphics::image::DustImage;
+use graphics::{image::DustImage, swapchain};
 use graphics::transfer;
 use log::debug;
 
@@ -83,7 +83,7 @@ fn display_gradient(ctxt: &VkContext) {
 
     let (swapchain_image_index, _suboptimal) = 
         graphics::swapchain::next_swapchain_image(signal_previous_draw_complete, Fence::null());
-    let swapchain_image = ctxt.swapchain_images.get(swapchain_image_index as usize).unwrap();
+    let swapchain_image = ctxt.swapchain_images.get(swapchain_image_index).unwrap();
 
     let buffer = match unsafe {
         ctxt.logical_device.allocate_command_buffers(
@@ -116,13 +116,12 @@ fn display_gradient(ctxt: &VkContext) {
         .base_array_layer(0)
         .layer_count(1)
         .mip_level(0);
-    let dst_subresource = src_subresource.clone();
 
     let image_to_image_info = ImageCopy::default()
         .src_offset(Offset3D::default().x(0).y(0).z(0))
         .dst_offset(Offset3D::default().x(0).y(0).z(0))
         .src_subresource(src_subresource)
-        .dst_subresource(dst_subresource);
+        .dst_subresource(src_subresource);
 
     let transfer_barrier = ImageMemoryBarrier::default()
         .dst_queue_family_index(QUEUE_FAMILY_IGNORED)
@@ -190,14 +189,52 @@ fn display_gradient(ctxt: &VkContext) {
         ctxt.logical_device.end_command_buffer(*buffer.first().unwrap());
     }
 
-    let submit_info = SubmitInfo::default()
-        .wait_semaphores(wait_semaphores)
+    let command_submission_fence = 
+        match unsafe {ctxt.logical_device.create_fence(&FenceCreateInfo::default().flags(FenceCreateFlags::empty()), None)} {
+        Ok(fence) => fence, 
+        Err(msg) => { panic!("Unable to create fence to signal end of draw commands: {:?}", msg); }
+    };
 
-    ctxt.logical_device.queue_submit(ctxt.graphics_queue, submits, fence)
+    let command_submission_semaphore = 
+        match unsafe {ctxt.logical_device.create_semaphore(&SemaphoreCreateInfo::default().flags(SemaphoreCreateFlags::empty()), None)} {
+            Ok(sem) => sem, 
+            Err(msg) => { panic! ("Unable to create semaphore to signal end of draw commands: {:?}", msg); }
+    };
+
+    let semaphores = [command_submission_semaphore];
+    let submission_blockers = [signal_previous_draw_complete];
+    let submission_buffers = [*buffer.first().unwrap()];
+    let submit_info = SubmitInfo::default()
+        .wait_semaphores(&submission_blockers)
+        .wait_dst_stage_mask(&[PipelineStageFlags::TRANSFER])
+        .command_buffers(&submission_buffers)
+        .signal_semaphores(&semaphores)
+    ;
+
+
+    unsafe {
+        match ctxt.logical_device.queue_submit(ctxt.graphics_queue, &[submit_info], command_submission_fence) 
+        {
+            Ok(_) => {}, 
+            Err(msg) => {
+                panic!("Unable to submit gradient copy to screen: {:?}", msg);
+            }
+        }
+        match ctxt.logical_device.wait_for_fences(&[command_submission_fence], true, 100000) {
+            Ok(_) => {}, 
+            Err(msg) => {
+                panic!("Failed to wait on fence: {:?}", msg);
+            }
+        }
+    }
+
+    swapchain::present_swapchain_image(swapchain_image_index as u32, &ctxt.graphics_queue, &semaphores);
 
 
     // ** DESTRUCTION ** //
     unsafe {
+        ctxt.logical_device.destroy_semaphore(command_submission_semaphore, None);
+        ctxt.logical_device.destroy_fence(command_submission_fence, None);
         ctxt.logical_device.destroy_semaphore(signal_previous_draw_complete, None);
     }
 }
