@@ -41,7 +41,7 @@ fn main() {
     let vk_context = instance::default(_xcb_ptr, &window);
     show_physical_memory_stats(&vk_context);
     // display_image(&vk_context);
-    display_gradient(&vk_context);
+    // display_gradient(&vk_context);
     sleep(Duration::from_secs(10));
 
     debug!("Vulkan instance destroyed...");
@@ -82,9 +82,9 @@ fn display_gradient(ctxt: &VkContext) {
         Err(msg) => {panic!("Failed to create new semaphore: {:?}", msg); }
     };
 
-    let (swapchain_image_index, _suboptimal) = 
+    let (swapchain_image_index, swapchain_image, _suboptimal) = 
         graphics::swapchain::next_swapchain_image(signal_previous_draw_complete, Fence::null());
-    let swapchain_image = ctxt.swapchain_images.get(swapchain_image_index).unwrap();
+    // let swapchain_image = ctxt.swapchain_images.get(swapchain_image_index).unwrap();
 
     let buffer = match unsafe {
         ctxt.logical_device.allocate_command_buffers(
@@ -139,8 +139,8 @@ fn display_gradient(ctxt: &VkContext) {
             .base_array_layer(0)
             .base_mip_level(0)
             .layer_count(1)
-        )
-        .image(*swapchain_image);
+        );
+        // .image(*swapchain_image);
 
     let presentation_barrier = ImageMemoryBarrier::default()
         .dst_queue_family_index(QUEUE_FAMILY_IGNORED)
@@ -155,8 +155,8 @@ fn display_gradient(ctxt: &VkContext) {
             .base_array_layer(0)
             .base_mip_level(0)
             .layer_count(1)
-        )
-        .image(*swapchain_image);
+        );
+        // .image(*swapchain_image);
 
     let mem_barriers = vec![];
     let buffer_barriers = vec![];
@@ -173,12 +173,12 @@ fn display_gradient(ctxt: &VkContext) {
             &buffer_barriers, 
             &copy_to_barriers
         );
-        ctxt.logical_device.cmd_copy_image(*buffer.first().unwrap(), 
-            gradient_src.image, 
-            ImageLayout::TRANSFER_SRC_OPTIMAL, 
-            *swapchain_image, 
-            ImageLayout::TRANSFER_DST_OPTIMAL, 
-            &[image_to_image_info]);
+        // ctxt.logical_device.cmd_copy_image(*buffer.first().unwrap(), 
+        //     gradient_src.image, 
+        //     ImageLayout::TRANSFER_SRC_OPTIMAL, 
+        //     *swapchain_image, 
+        //     ImageLayout::TRANSFER_DST_OPTIMAL, 
+        //     &[image_to_image_info]);
 
         ctxt.logical_device.cmd_pipeline_barrier(
             *buffer.first().unwrap(), 
@@ -448,7 +448,7 @@ fn display_image(vk_ctxt: &VkContext) {
         }
     };
 
-    let (swapchain_index, suboptimal) = graphics::swapchain::next_swapchain_image(
+    let (swapchain_index, swapchain_image, suboptimal) = graphics::swapchain::next_swapchain_image(
         swapchain_grab_semaphore,
         swapchain_image_acq_fence,
     );
@@ -481,10 +481,10 @@ fn display_image(vk_ctxt: &VkContext) {
         }
     };
 
-    let dst_image = vk_ctxt
-        .swapchain_images
-        .get(swapchain_index )
-        .unwrap();
+    // let dst_image = vk_ctxt
+    //     .swapchain_images
+    //     .get(swapchain_index )
+    //     .unwrap();
 
     let dst_img_subresource_range = ImageSubresourceRange::default()
         .aspect_mask(ImageAspectFlags::COLOR)
@@ -523,7 +523,7 @@ fn display_image(vk_ctxt: &VkContext) {
         .dst_queue_family_index(QUEUE_FAMILY_IGNORED)
         .src_access_mask(AccessFlags::NONE)
         .dst_access_mask(AccessFlags::TRANSFER_WRITE)
-        .image(*dst_image)
+        // .image(*swapchain_image)
         .subresource_range(dst_img_subresource_range);
 
     let presentation_transition_image_barrier = ImageMemoryBarrier::default()
@@ -532,7 +532,7 @@ fn display_image(vk_ctxt: &VkContext) {
         .src_queue_family_index(QUEUE_FAMILY_IGNORED)
         .dst_queue_family_index(QUEUE_FAMILY_IGNORED)
         .src_access_mask(AccessFlags::TRANSFER_WRITE)
-        .image(*dst_image)
+        // .image(*swapchain_image)
         .subresource_range(dst_img_subresource_range);
 
     let memory_barriers = Vec::new();
@@ -553,13 +553,13 @@ fn display_image(vk_ctxt: &VkContext) {
             buffer_barriers.as_slice(),
             copy_transition_image_barriers.as_slice(),
         );
-        vk_ctxt.logical_device.cmd_copy_buffer_to_image(
-            *command_buffer,
-            buffer,
-            *dst_image,
-            ImageLayout::GENERAL,
-            &[buffer_image_copy; 1],
-        );
+        // vk_ctxt.logical_device.cmd_copy_buffer_to_image(
+        //     *command_buffer,
+        //     buffer,
+        //     *swapchain_image,
+        //     ImageLayout::GENERAL,
+        //     &[buffer_image_copy; 1],
+        // );
         vk_ctxt.logical_device.cmd_pipeline_barrier(
             *command_buffer,
             PipelineStageFlags::TRANSFER,

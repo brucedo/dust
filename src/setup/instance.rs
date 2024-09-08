@@ -75,12 +75,12 @@ pub struct VkContext {
     khr_surface_instance: ash::khr::surface::Instance,
     surface: SurfaceKHR,
     pub surface_capabilities: SurfaceCapabilitiesKHR,
-    surface_formats: SurfaceFormatKHR,
+    // pub surface_formats: SurfaceFormatKHR,
     // presentation_queues: Vec<&'a DeviceQueueCreateInfo<'a>>,
     // pub swapchain_device: ash::khr::swapchain::Device,
     // pub swapchain: SwapchainKHR,
-    pub swapchain_images: Vec<Image>,
-    pub swapchain_views: Vec<ImageView>,
+    // pub swapchain_images: Vec<Image>,
+    // pub swapchain_views: Vec<ImageView>,
     pub graphics_queue_command_pools: Vec<CommandPool>,
     pub transfer_queue_command_pools: Vec<CommandPool>,
     pub buffers: Vec<CommandBuffer>,
@@ -120,23 +120,6 @@ pub fn default(xcb_ptr: *mut xcb_connection_t, xcb_window: &Window) -> VkContext
     debug!("Graphics queue indices: {:?}", graphics_queues);
     debug!("Graphics queue counts: {:?}", graphics_queue_counts);
     debug!("Graphics queue priorities: {:?}", graphics_priorities);
-
-    // let transfer_queues = select_transfer_queues(&queue_family_properties);
-    // let transfer_queue_counts =
-    //     choose_transfer_queue_counts(&queue_family_properties, &transfer_queues);
-    // let graphics_queues = select_graphics_queues(&queue_family_properties);
-    // let graphics_queue_counts =
-    //     choose_graphics_queue_counts(&queue_family_properties, &graphics_queues);
-    //
-    // let mut transfer_priorities = Vec::<Vec<f32>>::new();
-    // for count in &transfer_queue_counts {
-    //     transfer_priorities.push(vec![0.5; *count as usize]);
-    // }
-
-    // let mut graphics_priorities = Vec::<Vec<f32>>::new();
-    // for count in &graphics_queue_counts {
-    //     graphics_priorities.push(vec![0.5; *count as usize]);
-    // }
 
     let transfer_queue_create_infos = construct_queue_create_info(
         &transfer_queues,
@@ -236,7 +219,13 @@ pub fn default(xcb_ptr: *mut xcb_connection_t, xcb_window: &Window) -> VkContext
         &logical_device,
     );
 
-    graphics::swapchain::init(swapchain, swapchain_device);
+    graphics::swapchain::init(
+        swapchain,
+        swapchain_device,
+        swapchain_images,
+        swapchain_views,
+        surface_formats,
+    );
 
     VkContext {
         entry,
@@ -259,12 +248,12 @@ pub fn default(xcb_ptr: *mut xcb_connection_t, xcb_window: &Window) -> VkContext
         khr_surface_instance,
         surface,
         surface_capabilities,
-        surface_formats,
+        // surface_formats,
         // presentation_queues,
         // swapchain_device,
         // swapchain,
-        swapchain_images,
-        swapchain_views,
+        // swapchain_images,
+        // swapchain_views,
         graphics_queue_command_pools,
         transfer_queue_command_pools,
         buffers,
@@ -322,12 +311,9 @@ impl Drop for VkContext {
             self.graphics_queue_command_pools
                 .drain(0..self.graphics_queue_command_pools.len())
                 .for_each(|pool| self.logical_device.destroy_command_pool(pool, None));
-            self.swapchain_views
-                .drain(0..self.swapchain_views.len())
-                .for_each(|view| self.logical_device.destroy_image_view(view, None));
             // self.swapchain_device
             // .destroy_swapchain(self.swapchain, None);
-            crate::graphics::swapchain::destroy();
+            crate::graphics::swapchain::destroy(self);
             self.khr_surface_instance
                 .destroy_surface(self.surface, None);
             self.logical_device.destroy_device(None);
@@ -794,8 +780,8 @@ fn find_formats_and_colorspaces(
     };
 
     match formats.iter().find(|format| {
-        format.format == ash::vk::Format::B8G8R8A8_SRGB
-            || format.format == ash::vk::Format::R8G8B8A8_SRGB
+        format.format == ash::vk::Format::R8G8B8A8_SRGB
+            || format.format == ash::vk::Format::B8G8R8A8_SRGB
     }) {
         Some(format) => *format,
         None => {
