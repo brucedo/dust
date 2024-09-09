@@ -40,6 +40,9 @@ fn main() {
 
     let vk_context = instance::default(_xcb_ptr, &window);
     show_physical_memory_stats(&vk_context);
+
+    let gradient = load_gradient(&vk_context);
+    graphics::render::perform_simple_render(&vk_context, &gradient.view, gradient.format);
     // display_image(&vk_context);
     // display_gradient(&vk_context);
     sleep(Duration::from_secs(10));

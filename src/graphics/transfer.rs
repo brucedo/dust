@@ -150,7 +150,12 @@ where
         ctxt.logical_device.destroy_buffer(transfer_buffer, None);
     }
 
-    crate::graphics::image::new(image_target, device_memory, ctxt.logical_device.clone())
+    crate::graphics::image::new(
+        image_target,
+        image_props.format,
+        device_memory,
+        ctxt.logical_device.clone(),
+    )
 }
 
 pub fn copy_to_buffer<T>(data: &[T], ctxt: &VkContext, usage: BufferUsageFlags) -> Buffer
