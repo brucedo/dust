@@ -304,7 +304,7 @@ fn load_gradient(ctxt: &VkContext) -> DustImage {
         .usage(
             ImageUsageFlags::TRANSFER_SRC
                 | ImageUsageFlags::TRANSFER_DST
-                | ImageUsageFlags::COLOR_ATTACHMENT,
+                | ImageUsageFlags::INPUT_ATTACHMENT,
         )
         .tiling(ImageTiling::OPTIMAL);
 

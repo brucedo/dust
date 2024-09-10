@@ -1,8 +1,9 @@
 use ash::vk::{
-    AttachmentDescription, AttachmentDescriptionFlags, AttachmentLoadOp, AttachmentReference,
-    AttachmentStoreOp, Format, FramebufferCreateInfo, ImageLayout, ImageView, PipelineBindPoint,
-    RenderPassCreateFlags, RenderPassCreateInfo, SampleCountFlags, SubpassDescription,
-    SubpassDescriptionFlags, ATTACHMENT_UNUSED,
+    AccessFlags, AttachmentDescription, AttachmentDescriptionFlags, AttachmentLoadOp,
+    AttachmentReference, AttachmentStoreOp, Format, Framebuffer, FramebufferCreateInfo,
+    ImageLayout, ImageView, PipelineBindPoint, PipelineStageFlags, RenderPass,
+    RenderPassCreateFlags, RenderPassCreateInfo, SampleCountFlags, SubpassDependency,
+    SubpassDescription, SubpassDescriptionFlags, ATTACHMENT_UNUSED, SUBPASS_EXTERNAL,
 };
 
 use log::debug;
@@ -18,60 +19,15 @@ pub fn perform_simple_render(ctxt: &VkContext, bg_image_view: &ImageView, view_f
     let (image_index, image, optimal) =
         swapchain::next_swapchain_image(signal_acquired, block_till_acquired);
 
-    let sc_image_desc = make_color_description(swapchain::get_swapchain_format().format);
-    let bg_image_desc = make_input_description(view_fmt);
-
-    let sc_image_attachment_ref = AttachmentReference::default()
-        .attachment(0)
-        .layout(ImageLayout::COLOR_ATTACHMENT_OPTIMAL);
-    let bg_image_attachment_ref = AttachmentReference::default()
-        .attachment(1)
-        .layout(ImageLayout::READ_ONLY_OPTIMAL);
-
     let attachments = vec![*image, *bg_image_view];
-    let attachment_descs = vec![sc_image_desc, bg_image_desc];
 
-    let input_attachment_refs = [bg_image_attachment_ref];
-    let color_attachment_refs = [sc_image_attachment_ref];
-    let subpass_one = make_subpass_description(&input_attachment_refs, &color_attachment_refs);
-
-    let subpasses = [subpass_one];
-
-    let render_pass = match unsafe {
-        ctxt.logical_device.create_render_pass(
-            &RenderPassCreateInfo::default()
-                .attachments(&attachment_descs)
-                .flags(RenderPassCreateFlags::empty())
-                .subpasses(&subpasses),
-            // .dependencies(dependencies),
-            None,
-        )
-    } {
-        Ok(rp) => rp,
-        Err(msg) => {
-            panic!("Failed to construct a render pass: {:?}", msg);
-        }
-    };
-
-    let framebuffer = match unsafe {
-        ctxt.logical_device.create_framebuffer(
-            &FramebufferCreateInfo::default()
-                .width(ctxt.surface_capabilities.current_extent.width)
-                .height(ctxt.surface_capabilities.current_extent.height)
-                .attachments(&attachments)
-                .attachment_count(2)
-                .layers(1)
-                .render_pass(render_pass),
-            None,
-        )
-    } {
-        Ok(fb) => fb,
-        Err(msg) => {
-            panic!("Unable to create a framebuffer for our image: {:?}", msg);
-        }
-    };
+    let render_pass = make_render_pass(ctxt, view_fmt);
+    let framebuffer = make_framebuffer(ctxt, render_pass, &attachments);
 
     let render_complete = util::create_binary_semaphore(ctxt);
+
+    let buffer = ctxt.graphics_queue_command_pools
+
     swapchain::present_swapchain_image(image_index, &ctxt.graphics_queue, &[render_complete]);
 
     debug!("Reached end of render function.");
@@ -83,6 +39,79 @@ pub fn perform_simple_render(ctxt: &VkContext, bg_image_view: &ImageView, view_f
         ctxt.logical_device.destroy_framebuffer(framebuffer, None);
         ctxt.logical_device.destroy_render_pass(render_pass, None);
     }
+}
+
+fn make_framebuffer(
+    ctxt: &VkContext,
+    render_pass: RenderPass,
+    attachments: &[ImageView],
+) -> Framebuffer {
+    match unsafe {
+        ctxt.logical_device.create_framebuffer(
+            &FramebufferCreateInfo::default()
+                .width(ctxt.surface_capabilities.current_extent.width)
+                .height(ctxt.surface_capabilities.current_extent.height)
+                .attachments(attachments)
+                .attachment_count(2)
+                .layers(1)
+                .render_pass(render_pass),
+            None,
+        )
+    } {
+        Ok(fb) => fb,
+        Err(msg) => {
+            panic!("Unable to create a framebuffer for our image: {:?}", msg);
+        }
+    }
+}
+
+fn make_render_pass(ctxt: &VkContext, view_fmt: Format) -> RenderPass {
+    let sc_image_desc = make_color_description(swapchain::get_swapchain_format().format);
+    let bg_image_desc = make_input_description(view_fmt);
+
+    let attachment_descs = vec![sc_image_desc, bg_image_desc];
+
+    let sc_image_attachment_ref = AttachmentReference::default()
+        .attachment(0)
+        .layout(ImageLayout::COLOR_ATTACHMENT_OPTIMAL);
+    let bg_image_attachment_ref = AttachmentReference::default()
+        .attachment(1)
+        .layout(ImageLayout::READ_ONLY_OPTIMAL);
+    let input_attachment_refs = [bg_image_attachment_ref];
+    let color_attachment_refs = [sc_image_attachment_ref];
+
+    let subpass_one = make_subpass_description(&input_attachment_refs, &color_attachment_refs);
+    let subpasses = [subpass_one];
+
+    let src_dependency = make_dependency(SUBPASS_EXTERNAL, 0);
+    let dst_dependency = make_dependency(0, SUBPASS_EXTERNAL);
+    let dependencies = [src_dependency, dst_dependency];
+
+    match unsafe {
+        ctxt.logical_device.create_render_pass(
+            &RenderPassCreateInfo::default()
+                .attachments(&attachment_descs)
+                .flags(RenderPassCreateFlags::empty())
+                .subpasses(&subpasses)
+                .dependencies(&dependencies),
+            None,
+        )
+    } {
+        Ok(rp) => rp,
+        Err(msg) => {
+            panic!("Failed to construct a render pass: {:?}", msg);
+        }
+    }
+}
+
+fn make_dependency(src_id: u32, dst_id: u32) -> SubpassDependency {
+    SubpassDependency::default()
+        .src_subpass(src_id)
+        .dst_subpass(dst_id)
+        .src_stage_mask(PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT)
+        .dst_stage_mask(PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT)
+        .src_access_mask(AccessFlags::MEMORY_WRITE)
+        .dst_access_mask(AccessFlags::MEMORY_READ)
 }
 
 fn make_subpass_description<'a>(
