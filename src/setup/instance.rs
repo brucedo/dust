@@ -81,9 +81,9 @@ pub struct VkContext {
     // pub swapchain: SwapchainKHR,
     // pub swapchain_images: Vec<Image>,
     // pub swapchain_views: Vec<ImageView>,
-    pub graphics_queue_command_pools: Vec<CommandPool>,
-    pub transfer_queue_command_pools: Vec<CommandPool>,
-    pub buffers: Vec<CommandBuffer>,
+    // pub graphics_queue_command_pools: Vec<CommandPool>,
+    // pub transfer_queue_command_pools: Vec<CommandPool>,
+    // pub buffers: Vec<CommandBuffer>,
 }
 
 #[cfg(all(target_os = "linux", not(target_os = "windows")))]
@@ -204,20 +204,24 @@ pub fn default(xcb_ptr: *mut xcb_connection_t, xcb_window: &Window) -> VkContext
     let swapchain_views: Vec<ImageView> =
         image_views(&logical_device, &swapchain_images, surface_formats.format);
 
-    let mut graphics_queue_command_pools = Vec::new();
-    for queue_family in &graphics_queues {
-        graphics_queue_command_pools.push(build_pools(*queue_family, &logical_device));
-    }
+    // let mut graphics_queue_command_pools = Vec::new();
+    // for queue_family in &graphics_queues {
+    //     graphics_queue_command_pools.push(build_pools(*queue_family, &logical_device));
+    // }
+    //
+    // let mut transfer_queue_command_pools = Vec::new();
+    // for queue_family in &transfer_queues {
+    //     transfer_queue_command_pools.push(build_pools(*queue_family, &logical_device));
+    // }
+    let graphics_pool = build_pools(*graphics_queues.first().unwrap(), &logical_device);
+    let transfer_pool = build_pools(*transfer_queues.first().unwrap(), &logical_device);
 
-    let mut transfer_queue_command_pools = Vec::new();
-    for queue_family in &transfer_queues {
-        transfer_queue_command_pools.push(build_pools(*queue_family, &logical_device));
-    }
+    crate::graphics::pools::init(graphics_pool, transfer_pool, logical_device.clone());
 
-    let buffers = allocate_command_buffer(
-        graphics_queue_command_pools.first().unwrap(),
-        &logical_device,
-    );
+    // let buffers = allocate_command_buffer(
+    //     graphics_queue_command_pools.first().unwrap(),
+    //     &logical_device,
+    // );
 
     graphics::swapchain::init(
         swapchain,
@@ -254,9 +258,9 @@ pub fn default(xcb_ptr: *mut xcb_connection_t, xcb_window: &Window) -> VkContext
         // swapchain,
         // swapchain_images,
         // swapchain_views,
-        graphics_queue_command_pools,
-        transfer_queue_command_pools,
-        buffers,
+        // graphics_queue_command_pools,
+        // transfer_queue_command_pools,
+        // buffers,
     }
 }
 
@@ -304,16 +308,11 @@ impl Drop for VkContext {
     fn drop(&mut self) {
         debug!("Killing Vulkan objects.");
         unsafe {
-            self.buffers.clear();
-            self.transfer_queue_command_pools
-                .drain(0..self.transfer_queue_command_pools.len())
-                .for_each(|pool| self.logical_device.destroy_command_pool(pool, None));
-            self.graphics_queue_command_pools
-                .drain(0..self.graphics_queue_command_pools.len())
-                .for_each(|pool| self.logical_device.destroy_command_pool(pool, None));
+            // self.buffers.clear();
             // self.swapchain_device
             // .destroy_swapchain(self.swapchain, None);
             crate::graphics::swapchain::destroy(self);
+            crate::graphics::pools::destroy(self);
             self.khr_surface_instance
                 .destroy_surface(self.surface, None);
             self.logical_device.destroy_device(None);

@@ -1,9 +1,10 @@
 use ash::vk::{
     AccessFlags, AttachmentDescription, AttachmentDescriptionFlags, AttachmentLoadOp,
-    AttachmentReference, AttachmentStoreOp, Format, Framebuffer, FramebufferCreateInfo,
-    ImageLayout, ImageView, PipelineBindPoint, PipelineStageFlags, RenderPass,
-    RenderPassCreateFlags, RenderPassCreateInfo, SampleCountFlags, SubpassDependency,
-    SubpassDescription, SubpassDescriptionFlags, ATTACHMENT_UNUSED, SUBPASS_EXTERNAL,
+    AttachmentReference, AttachmentStoreOp, ClearColorValue, ClearValue, Extent2D, Format,
+    Framebuffer, FramebufferCreateInfo, ImageLayout, ImageView, Offset2D, PipelineBindPoint,
+    PipelineStageFlags, RenderPass, RenderPassBeginInfo, RenderPassCreateFlags,
+    RenderPassCreateInfo, SampleCountFlags, SubpassContents, SubpassDependency, SubpassDescription,
+    SubpassDescriptionFlags, ATTACHMENT_UNUSED, SUBPASS_EXTERNAL,
 };
 
 use log::debug;
@@ -26,7 +27,34 @@ pub fn perform_simple_render(ctxt: &VkContext, bg_image_view: &ImageView, view_f
 
     let render_complete = util::create_binary_semaphore(ctxt);
 
-    let buffer = ctxt.graphics_queue_command_pools
+    let mut clear_color = ClearColorValue::default();
+    clear_color.uint32 = [0, 0, 0, 0xFFFFFFFF];
+    let mut clear_value = ClearValue::default();
+    clear_value.color = clear_color;
+    let clear_values = [clear_value, clear_value];
+
+    let buffer = crate::graphics::pools::reserve_graphics_buffer(ctxt);
+
+    let render_pass_begin = RenderPassBeginInfo::default()
+        .framebuffer(framebuffer)
+        .render_pass(render_pass)
+        .render_area(ash::vk::Rect2D {
+            offset: Offset2D::default().x(0).y(0),
+            extent: Extent2D::default().width(1920).height(1080),
+        })
+        .clear_values(&clear_values);
+
+    unsafe {
+        ctxt.logical_device.cmd_begin_render_pass(
+            buffer,
+            &render_pass_begin,
+            SubpassContents::INLINE,
+        );
+    }
+
+    unsafe {
+        ctxt.logical_device.cmd_end_render_pass(buffer);
+    }
 
     swapchain::present_swapchain_image(image_index, &ctxt.graphics_queue, &[render_complete]);
 

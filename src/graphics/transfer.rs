@@ -84,19 +84,20 @@ where
         .subresource_range(transfer_subresource_range);
     let transfer_back_barriers = vec![transfer_back_image_barrier];
 
-    let cmd_buffer = match unsafe {
-        ctxt.logical_device.allocate_command_buffers(
-            &CommandBufferAllocateInfo::default()
-                .command_pool(*ctxt.transfer_queue_command_pools.first().unwrap())
-                .command_buffer_count(1)
-                .level(CommandBufferLevel::PRIMARY),
-        )
-    } {
-        Ok(mut buffers) => buffers.pop().unwrap(),
-        Err(msg) => {
-            panic!("Unable to allocate command buffers: {:?}", msg);
-        }
-    };
+    // let cmd_buffer = match unsafe {
+    //     ctxt.logical_device.allocate_command_buffers(
+    //         &CommandBufferAllocateInfo::default()
+    //             .command_pool(*ctxt.transfer_queue_command_pools.first().unwrap())
+    //             .command_buffer_count(1)
+    //             .level(CommandBufferLevel::PRIMARY),
+    //     )
+    // } {
+    //     Ok(mut buffers) => buffers.pop().unwrap(),
+    //     Err(msg) => {
+    //         panic!("Unable to allocate command buffers: {:?}", msg);
+    //     }
+    // };
+    let cmd_buffer = crate::graphics::pools::reserve_transfer_buffer(ctxt);
 
     unsafe {
         match ctxt.logical_device.begin_command_buffer(
@@ -175,20 +176,22 @@ where
         .src_offset(0)
         .dst_offset(0)];
 
-    let cmd_buffer_alloc_info = CommandBufferAllocateInfo::default()
-        .level(CommandBufferLevel::PRIMARY)
-        .command_pool(*ctxt.transfer_queue_command_pools.first().unwrap())
-        .command_buffer_count(1);
-
-    let cmd_buffer = match unsafe {
-        ctxt.logical_device
-            .allocate_command_buffers(&cmd_buffer_alloc_info)
-    } {
-        Ok(buffer) => buffer,
-        Err(msg) => {
-            panic!("Failed to allocate buffer from transfer pool: {:?}", msg);
-        }
-    };
+    // let cmd_buffer_alloc_info = CommandBufferAllocateInfo::default()
+    //     .level(CommandBufferLevel::PRIMARY)
+    //     .command_pool(*ctxt.transfer_queue_command_pools.first().unwrap())
+    //     .command_buffer_count(1);
+    //
+    // let cmd_buffer = match unsafe {
+    //     ctxt.logical_device
+    //         .allocate_command_buffers(&cmd_buffer_alloc_info)
+    // } {
+    //     Ok(buffer) => buffer,
+    //     Err(msg) => {
+    //         panic!("Failed to allocate buffer from transfer pool: {:?}", msg);
+    //     }
+    // };
+    //
+    let cmd_buffer = crate::graphics::pools::reserve_transfer_buffer(ctxt);
 
     let begin_info =
         CommandBufferBeginInfo::default().flags(CommandBufferUsageFlags::ONE_TIME_SUBMIT);
@@ -215,7 +218,8 @@ where
     unsafe {
         match ctxt
             .logical_device
-            .begin_command_buffer(*cmd_buffer.first().unwrap(), &begin_info)
+            // .begin_command_buffer(*cmd_buffer.first().unwrap(), &begin_info)
+            .begin_command_buffer(cmd_buffer, &begin_info)
         {
             Ok(_) => {}
             Err(msg) => {
@@ -223,13 +227,15 @@ where
             }
         }
         ctxt.logical_device.cmd_copy_buffer(
-            *cmd_buffer.first().unwrap(),
+            // *cmd_buffer.first().unwrap(),
+            cmd_buffer,
             transfer_buffer,
             perm_buffer,
             &copy_region,
         );
         ctxt.logical_device.cmd_pipeline_barrier(
-            *cmd_buffer.first().unwrap(),
+            // *cmd_buffer.first().unwrap(),
+            cmd_buffer,
             PipelineStageFlags::TRANSFER,
             PipelineStageFlags::ALL_COMMANDS,
             DependencyFlags::empty(),
@@ -239,7 +245,8 @@ where
         );
         match ctxt
             .logical_device
-            .end_command_buffer(*cmd_buffer.first().unwrap())
+            // .end_command_buffer(*cmd_buffer.first().unwrap())
+            .end_command_buffer(cmd_buffer)
         {
             Ok(_) => {}
             Err(msg) => {
@@ -248,9 +255,9 @@ where
         }
     }
 
-    let commands_to_run = &cmd_buffer[0..1];
+    // let commands_to_run = &cmd_buffer[0..1];
 
-    run_commands_blocking(ctxt, commands_to_run);
+    run_commands_blocking(ctxt, &[cmd_buffer]);
 
     unsafe {
         ctxt.logical_device.destroy_buffer(transfer_buffer, None);

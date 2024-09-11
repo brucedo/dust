@@ -89,23 +89,24 @@ fn display_gradient(ctxt: &VkContext) {
         graphics::swapchain::next_swapchain_image(signal_previous_draw_complete, Fence::null());
     // let swapchain_image = ctxt.swapchain_images.get(swapchain_image_index).unwrap();
 
-    let buffer = match unsafe {
-        ctxt.logical_device.allocate_command_buffers(
-            &CommandBufferAllocateInfo::default()
-                .command_pool(*ctxt.graphics_queue_command_pools.first().unwrap())
-                .command_buffer_count(1)
-                .level(CommandBufferLevel::PRIMARY),
-        )
-    } {
-        Ok(buffer) => buffer,
-        Err(msg) => {
-            panic!("Unable to allocate command buffer: {:?}", msg);
-        }
-    };
+    let buffer = crate::graphics::pools::reserve_graphics_buffer(ctxt);
+    // let buffer = match unsafe {
+    //     ctxt.logical_device.allocate_command_buffers(
+    //         &CommandBufferAllocateInfo::default()
+    //             .command_pool(*ctxt.graphics_queue_command_pools.first().unwrap())
+    //             .command_buffer_count(1)
+    //             .level(CommandBufferLevel::PRIMARY),
+    //     )
+    // } {
+    //     Ok(buffer) => buffer,
+    //     Err(msg) => {
+    //         panic!("Unable to allocate command buffer: {:?}", msg);
+    //     }
+    // };
 
     match unsafe {
-        ctxt.logical_device.begin_command_buffer(
-            *buffer.first().unwrap(),
+        ctxt.logical_device.begin_command_buffer(buffer, 
+            // *buffer.first().unwrap(),
             &CommandBufferBeginInfo::default().flags(CommandBufferUsageFlags::ONE_TIME_SUBMIT),
         )
     } {
@@ -168,7 +169,8 @@ fn display_gradient(ctxt: &VkContext) {
 
     unsafe {
         ctxt.logical_device.cmd_pipeline_barrier(
-            *buffer.first().unwrap(), 
+            // *buffer.first().unwrap(), 
+            buffer, 
             PipelineStageFlags::TOP_OF_PIPE, 
             PipelineStageFlags::TRANSFER, 
             DependencyFlags::empty(), 
@@ -184,7 +186,8 @@ fn display_gradient(ctxt: &VkContext) {
         //     &[image_to_image_info]);
 
         ctxt.logical_device.cmd_pipeline_barrier(
-            *buffer.first().unwrap(), 
+            // *buffer.first().unwrap(), 
+            buffer, 
             PipelineStageFlags::TRANSFER, 
             PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT, 
             DependencyFlags::empty(), 
@@ -192,7 +195,8 @@ fn display_gradient(ctxt: &VkContext) {
             &buffer_barriers, 
             &presentation_barriers);
 
-        ctxt.logical_device.end_command_buffer(*buffer.first().unwrap());
+        // ctxt.logical_device.end_command_buffer(*buffer.first().unwrap());
+        ctxt.logical_device.end_command_buffer(buffer);
     }
 
     let command_submission_fence = 
@@ -209,7 +213,8 @@ fn display_gradient(ctxt: &VkContext) {
 
     let semaphores = [command_submission_semaphore];
     let submission_blockers = [signal_previous_draw_complete];
-    let submission_buffers = [*buffer.first().unwrap()];
+    // let submission_buffers = [*buffer.first().unwrap()];
+    let submission_buffers = [buffer];
     let submit_info = SubmitInfo::default()
         .wait_semaphores(&submission_blockers)
         .wait_dst_stage_mask(&[PipelineStageFlags::TRANSFER])
@@ -471,12 +476,13 @@ fn display_image(vk_ctxt: &VkContext) {
 
     debug!("Passed image grab wait.");
 
-    let command_buffer = vk_ctxt.buffers.first().unwrap();
+    // let command_buffer = vk_ctxt.buffers.first().unwrap();
+    let command_buffer = crate::graphics::pools::reserve_graphics_buffer(&vk_ctxt);
 
     match unsafe {
         vk_ctxt
             .logical_device
-            .reset_command_buffer(*command_buffer, CommandBufferResetFlags::empty())
+            .reset_command_buffer(command_buffer, CommandBufferResetFlags::empty())
     } {
         Ok(_) => {}
         Err(msg) => {
@@ -511,7 +517,7 @@ fn display_image(vk_ctxt: &VkContext) {
     match unsafe {
         vk_ctxt
             .logical_device
-            .begin_command_buffer(*command_buffer, &CommandBufferBeginInfo::default())
+            .begin_command_buffer(command_buffer, &CommandBufferBeginInfo::default())
     } {
         Ok(_) => {}
         Err(msg) => {
@@ -548,7 +554,7 @@ fn display_image(vk_ctxt: &VkContext) {
 
     unsafe {
         vk_ctxt.logical_device.cmd_pipeline_barrier(
-            *command_buffer,
+            command_buffer,
             PipelineStageFlags::TRANSFER,
             PipelineStageFlags::TRANSFER,
             DependencyFlags::empty(),
@@ -564,7 +570,7 @@ fn display_image(vk_ctxt: &VkContext) {
         //     &[buffer_image_copy; 1],
         // );
         vk_ctxt.logical_device.cmd_pipeline_barrier(
-            *command_buffer,
+            command_buffer,
             PipelineStageFlags::TRANSFER,
             PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
             DependencyFlags::empty(),
@@ -572,7 +578,7 @@ fn display_image(vk_ctxt: &VkContext) {
             buffer_barriers.as_slice(),
             presentation_transition_image_barriers.as_slice(),
         );
-        match vk_ctxt.logical_device.end_command_buffer(*command_buffer) {
+        match vk_ctxt.logical_device.end_command_buffer(command_buffer) {
             Ok(_) => {}
             Err(msg) => {
                 panic!("Failed to end command buffer: {:?}", msg);
@@ -582,7 +588,7 @@ fn display_image(vk_ctxt: &VkContext) {
 
     let semaphore_array = [swapchain_grab_semaphore; 1];
     let draw_semaphore_array = [draw_complete_semaphore; 1];
-    let buffer_array = [*command_buffer; 1];
+    let buffer_array = [command_buffer; 1];
 
     let queue_submit_info = SubmitInfo::default()
         .wait_semaphores(&semaphore_array)
