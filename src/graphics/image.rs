@@ -67,6 +67,7 @@ impl Drop for DustImage {
         unsafe {
             self.logical_device.destroy_image(self.image, None);
             self.logical_device.free_memory(self.memory, None);
+            self.logical_device.destroy_image_view(self.view, None);
         }
     }
 }

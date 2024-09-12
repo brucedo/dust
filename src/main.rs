@@ -250,6 +250,45 @@ fn display_gradient(ctxt: &VkContext) {
     }
 }
 
+fn load_black(ctxt: &VkContext) -> DustImage {
+    let image_width = ctxt.surface_capabilities.current_extent.width;
+    let image_height = ctxt.surface_capabilities.current_extent.height;
+
+    let pixel_stride = 4;
+    let buffer_size_in_bytes = image_width * image_height * pixel_stride;
+    
+    let mut host_buffer: Vec<u8> = vec![0; buffer_size_in_bytes as usize];
+
+    let target_image = &ImageCreateInfo::default()
+        .initial_layout(ImageLayout::UNDEFINED)
+        .sharing_mode(SharingMode::EXCLUSIVE)
+        .image_type(ImageType::TYPE_2D)
+        .array_layers(1)
+        .format(Format::R8G8B8A8_SRGB)
+        .extent(
+            Extent3D::default()
+                .height(image_height)
+                .width(image_width)
+                .depth(1),
+        )
+        .mip_levels(1)
+        .samples(SampleCountFlags::TYPE_1)
+        .flags(ImageCreateFlags::empty())
+        .usage(
+            ImageUsageFlags::TRANSFER_SRC
+                | ImageUsageFlags::TRANSFER_DST
+                | ImageUsageFlags::INPUT_ATTACHMENT,
+        )
+        .tiling(ImageTiling::OPTIMAL);
+
+    transfer::copy_to_image(
+        &host_buffer,
+        ctxt,
+        target_image,
+        ImageLayout::TRANSFER_SRC_OPTIMAL,
+    )
+}
+
 fn load_gradient(ctxt: &VkContext) -> DustImage {
     let image_width = ctxt.surface_capabilities.current_extent.width;
     let image_height = ctxt.surface_capabilities.current_extent.height;
@@ -316,7 +355,7 @@ fn load_gradient(ctxt: &VkContext) -> DustImage {
     transfer::copy_to_image(
         &host_buffer,
         ctxt,
-        &target_image,
+        target_image,
         ImageLayout::TRANSFER_SRC_OPTIMAL,
     )
 }
