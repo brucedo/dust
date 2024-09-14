@@ -44,7 +44,6 @@ use ash::{Device, Entry, Instance};
 use core::panic;
 use log::{debug, error};
 use std::ffi::{c_void, CStr, CString};
-use std::rc::Rc;
 use std::sync::Arc;
 use xcb::ffi::xcb_connection_t;
 use xcb::x::Window;
@@ -52,8 +51,6 @@ use xcb::Xid;
 
 use crate::dust_errors::DustError;
 
-type Index = usize;
-type Count = u32;
 pub struct VkContext {
     entry: ash::Entry,
     instance: ash::Instance,
