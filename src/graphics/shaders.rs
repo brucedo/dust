@@ -83,7 +83,7 @@ fn load_shader(file_name: &mut File) -> Result<Vec<u32>, Error> {
     }
 }
 
-pub fn load_shaders() -> HashMap<String, ShaderType> {
+pub fn load_shaders() -> HashMap<String, ShaderWrapper> {
     let mut current_path = match std::env::current_exe() {
         Ok(path) => path,
         Err(msg) => {
@@ -142,7 +142,7 @@ fn make_shader_module(bytecode: &[u32]) -> Result<ShaderModule, DustError> {
     }
 }
 
-fn process_shader_directory(path: &Path, storage: &mut HashMap<String, ShaderType>) {
+fn process_shader_directory(path: &Path, storage: &mut HashMap<String, ShaderWrapper>) {
     let dir_contents = match read_dir(path) {
         Ok(dir) => dir,
         Err(msg) => {
@@ -162,7 +162,7 @@ fn process_shader_directory(path: &Path, storage: &mut HashMap<String, ShaderTyp
     }
 }
 
-fn process_shader_file(path: &Path, storage: &mut HashMap<String, ShaderType>) {
+fn process_shader_file(path: &Path, storage: &mut HashMap<String, ShaderWrapper>) {
     if let Ok(mut file) = File::open(path) {
         let shader_contents = match load_shader(&mut file) {
             Ok(vec) => vec,
@@ -185,25 +185,50 @@ fn process_shader_file(path: &Path, storage: &mut HashMap<String, ShaderType>) {
 
         let shader_type = match path.to_str() {
             Some(path_str) if path_str.contains("fragment") => {
-                ShaderType::Fragment(module)
+                ShaderType::Fragment
             }
 
-            Some(path_str) if path_str.contains("vertex") => ShaderType::Vertex(module),
+            Some(path_str) if path_str.contains("vertex") => ShaderType::Vertex,
             Some(path_str) if path_str.contains("geometry") => {
-                ShaderType::Geometry(module)
+                ShaderType::Geometry
             }
             Some(path_str) if path_str.contains("tess_ctrl") => {
-                ShaderType::TesselationControl(module)
+                ShaderType::TesselationControl
             }
             Some(path_str) if path_str.contains("tess_eval") => {
-                ShaderType::TesselationEval(module)
+                ShaderType::TesselationEval
             }
-            Some(path_str) if path_str.contains("compute") => ShaderType::Compute(module),
+            Some(path_str) if path_str.contains("compute") => ShaderType::Compute,
 
             Some(_) => unreachable!("Shaders must be one of fragment, vertex, geometry, tesselation control, \
                 tesselation evaluation, or compute, and must be in an appropriately named subdirectory."),
             None => {
                 unreachable!("There should be no path that has allowed me to open a file and read it that then has no path.");
+            }
+        };
+
+        let shader_name = path.file_stem().and_then(|file_name_os_str| {
+            file_name_os_str
+                .to_str()
+                .and_then(|file_name_str| Some(String::from(file_name_str)))
+        });
+
+        match shader_name {
+            Some(name) => {
+                storage.insert(
+                    name.clone(),
+                    ShaderWrapper {
+                        shader_type,
+                        shader_module: module,
+                        name,
+                    },
+                );
+            }
+            None => {
+                error!(
+                    "A shader name could not be converted from the OS-specific string {:?}",
+                    path
+                );
             }
         };
     }
