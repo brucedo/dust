@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fs::read_dir, path::Path};
+use std::{collections::HashMap, fs::read_dir, path::Path, sync::OnceLock};
 #[cfg(all(target_os = "linux", not(target_os = "windows")))]
 use std::{
     fs::File,
@@ -6,7 +6,11 @@ use std::{
     os::unix::fs::MetadataExt,
 };
 
-use log::debug;
+use std::sync::Arc;
+
+use ash::vk::{ShaderModule, ShaderModuleCreateFlags, ShaderModuleCreateInfo};
+use ash::Device;
+use log::{debug, error};
 
 #[cfg(all(target_os = "windows", not(target_os = "linux")))]
 use std::{
@@ -15,13 +19,34 @@ use std::{
     os::windows::fs::MetadataExt,
 };
 
+use crate::{dust_errors::DustError, setup::instance::VkContext};
+
+static LOGICAL_DEVICE: OnceLock<Arc<Device>> = OnceLock::new();
+
+pub fn init(device: Arc<Device>) {
+    match LOGICAL_DEVICE.set(device) {
+        Ok(_) => {}
+        Err(_) => {
+            panic!("The logical device Arc could not be set in the shader module.");
+        }
+    };
+}
+
+pub fn destroy(ctxt: &VkContext) {}
+
 pub enum ShaderType {
-    Vertex(Vec<u32>),
-    Fragment(Vec<u32>),
-    TesselationControl(Vec<u32>),
-    TesselationEval(Vec<u32>),
-    Geometry(Vec<u32>),
-    Compute(Vec<u32>),
+    Vertex,
+    Fragment,
+    TesselationControl,
+    TesselationEval,
+    Geometry,
+    Compute,
+}
+
+pub struct ShaderWrapper {
+    shader_module: ShaderModule,
+    name: String,
+    shader_type: ShaderType,
 }
 
 // *** load_shader(file_name: &mut File) -> Result<Vec<u32>, Error>
@@ -33,7 +58,7 @@ pub enum ShaderType {
 // file should be a multiple of 4 bytes long, and we reject any File that fails this property
 // check.
 //
-pub fn load_shader(file_name: &mut File) -> Result<Vec<u32>, Error> {
+fn load_shader(file_name: &mut File) -> Result<Vec<u32>, Error> {
     #[cfg(all(target_os = "linux", not(target_os = "windows")))]
     let file_size = file_name.metadata()?.size();
 
@@ -59,19 +84,62 @@ pub fn load_shader(file_name: &mut File) -> Result<Vec<u32>, Error> {
 }
 
 pub fn load_shaders() -> HashMap<String, ShaderType> {
-    let mut current_path = match std::env::current_dir() {
+    let mut current_path = match std::env::current_exe() {
         Ok(path) => path,
         Err(msg) => {
             panic!("There appears to be no current directory? {:?}", msg);
         }
     };
 
+    // Using current exe - need to drop the executable from the tail of the path.
+    current_path.pop();
     current_path.push("shaders");
+    debug!("Shader root path: {:?}", current_path);
+
     let mut storage = HashMap::new();
 
     process_shader_directory(&current_path, &mut storage);
 
+    // for (name, shader_type) in storage {
+    //     match shader_type {
+    //         ShaderType::Vertex(raw_code) => {
+    //             ShaderModuleCreateInfo::default()
+    //                 .flags(ShaderModuleCreateFlags::empty())
+    //                 .code(&raw_code);
+    //         }
+    //         _ => {}
+    //     }
+    // }
+
     storage
+}
+
+pub fn destroy_shaders(mut shader_map: HashMap<String, ShaderWrapper>) {
+    match LOGICAL_DEVICE.get() {
+        Some(device) => shader_map.drain().for_each(|(name, shader_type)| unsafe {
+            device.destroy_shader_module(shader_type.shader_module, None)
+        }),
+
+        None => {
+            panic!("The Vulkan environment has not been initialized.");
+        }
+    };
+}
+
+fn make_shader_module(bytecode: &[u32]) -> Result<ShaderModule, DustError> {
+    let create_info = ShaderModuleCreateInfo::default()
+        .flags(ShaderModuleCreateFlags::empty())
+        .code(bytecode);
+
+    match LOGICAL_DEVICE.get() {
+        Some(device) => match unsafe { device.create_shader_module(&create_info, None) } {
+            Ok(module) => Ok(module),
+            Err(msg) => Err(DustError::CreateShaderModuleFailed(msg)),
+        },
+        None => {
+            panic!("The Vulkan environment has not been initialized.  We cannot continue.");
+        }
+    }
 }
 
 fn process_shader_directory(path: &Path, storage: &mut HashMap<String, ShaderType>) {
@@ -107,22 +175,30 @@ fn process_shader_file(path: &Path, storage: &mut HashMap<String, ShaderType>) {
             }
         };
 
+        let module = match make_shader_module(&shader_contents) {
+            Ok(module) => module,
+            Err(msg) => {
+                error!("Shader load operation failed: {:?}", msg);
+                return;
+            }
+        };
+
         let shader_type = match path.to_str() {
             Some(path_str) if path_str.contains("fragment") => {
-                ShaderType::Fragment(shader_contents)
+                ShaderType::Fragment(module)
             }
 
-            Some(path_str) if path_str.contains("vertex") => ShaderType::Vertex(shader_contents),
+            Some(path_str) if path_str.contains("vertex") => ShaderType::Vertex(module),
             Some(path_str) if path_str.contains("geometry") => {
-                ShaderType::Geometry(shader_contents)
+                ShaderType::Geometry(module)
             }
             Some(path_str) if path_str.contains("tess_ctrl") => {
-                ShaderType::TesselationControl(shader_contents)
+                ShaderType::TesselationControl(module)
             }
             Some(path_str) if path_str.contains("tess_eval") => {
-                ShaderType::TesselationEval(shader_contents)
+                ShaderType::TesselationEval(module)
             }
-            Some(path_str) if path_str.contains("compute") => ShaderType::Compute(shader_contents),
+            Some(path_str) if path_str.contains("compute") => ShaderType::Compute(module),
 
             Some(_) => unreachable!("Shaders must be one of fragment, vertex, geometry, tesselation control, \
                 tesselation evaluation, or compute, and must be in an appropriately named subdirectory."),

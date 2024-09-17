@@ -214,6 +214,7 @@ pub fn default(xcb_ptr: *mut xcb_connection_t, xcb_window: &Window) -> VkContext
     let transfer_pool = build_pools(*transfer_queues.first().unwrap(), &logical_device);
 
     crate::graphics::pools::init(graphics_pool, transfer_pool, logical_device.clone());
+    crate::graphics::shaders::init(logical_device.clone());
 
     // let buffers = allocate_command_buffer(
     //     graphics_queue_command_pools.first().unwrap(),
@@ -310,6 +311,7 @@ impl Drop for VkContext {
             // .destroy_swapchain(self.swapchain, None);
             crate::graphics::swapchain::destroy(self);
             crate::graphics::pools::destroy(self);
+            crate::graphics::shaders::destroy(self);
             self.khr_surface_instance
                 .destroy_surface(self.surface, None);
             self.logical_device.destroy_device(None);
