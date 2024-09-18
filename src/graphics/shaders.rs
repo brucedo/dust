@@ -1,4 +1,10 @@
-use std::{collections::HashMap, fs::read_dir, path::Path, sync::OnceLock};
+use std::{
+    borrow::BorrowMut,
+    collections::HashMap,
+    fs::read_dir,
+    path::Path,
+    sync::{LazyLock, OnceLock, RwLock},
+};
 #[cfg(all(target_os = "linux", not(target_os = "windows")))]
 use std::{
     fs::File,
@@ -22,6 +28,7 @@ use std::{
 use crate::{dust_errors::DustError, setup::instance::VkContext};
 
 static LOGICAL_DEVICE: OnceLock<Arc<Device>> = OnceLock::new();
+static mut SHADERS: OnceLock<HashMap<String, ShaderWrapper>> = OnceLock::new();
 
 pub fn init(device: Arc<Device>) {
     match LOGICAL_DEVICE.set(device) {
@@ -30,9 +37,32 @@ pub fn init(device: Arc<Device>) {
             panic!("The logical device Arc could not be set in the shader module.");
         }
     };
+
+    let shaders = load_shaders();
+
+    unsafe {
+        SHADERS.set(shaders);
+    }
 }
 
-pub fn destroy(ctxt: &VkContext) {}
+pub fn destroy(ctxt: &VkContext) {
+    match unsafe { SHADERS.take() } {
+        Some(shaders) => {
+            destroy_shaders(shaders);
+        }
+        None => {}
+    }
+}
+
+pub fn shader_by_name(name: &str) -> Option<&ShaderWrapper> {
+    match unsafe { SHADERS.get() } {
+        Some(map) => map.get(name),
+        None => {
+            error!("The shaders have not been loaded; Vulkan has not been properly initialized.");
+            None
+        }
+    }
+}
 
 pub enum ShaderType {
     Vertex,
@@ -44,9 +74,9 @@ pub enum ShaderType {
 }
 
 pub struct ShaderWrapper {
-    shader_module: ShaderModule,
-    name: String,
-    shader_type: ShaderType,
+    pub shader_module: ShaderModule,
+    pub name: String,
+    pub shader_type: ShaderType,
 }
 
 // *** load_shader(file_name: &mut File) -> Result<Vec<u32>, Error>
@@ -83,7 +113,7 @@ fn load_shader(file_name: &mut File) -> Result<Vec<u32>, Error> {
     }
 }
 
-pub fn load_shaders() -> HashMap<String, ShaderWrapper> {
+fn load_shaders() -> HashMap<String, ShaderWrapper> {
     let mut current_path = match std::env::current_exe() {
         Ok(path) => path,
         Err(msg) => {
@@ -114,7 +144,7 @@ pub fn load_shaders() -> HashMap<String, ShaderWrapper> {
     storage
 }
 
-pub fn destroy_shaders(mut shader_map: HashMap<String, ShaderWrapper>) {
+fn destroy_shaders(mut shader_map: HashMap<String, ShaderWrapper>) {
     match LOGICAL_DEVICE.get() {
         Some(device) => shader_map.drain().for_each(|(name, shader_type)| unsafe {
             device.destroy_shader_module(shader_type.shader_module, None)

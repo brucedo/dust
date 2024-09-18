@@ -4,15 +4,18 @@ use ash::vk::{
     AccessFlags, AttachmentDescription, AttachmentDescriptionFlags, AttachmentLoadOp,
     AttachmentReference, AttachmentStoreOp, ClearColorValue, ClearValue, CommandBufferBeginInfo,
     CommandBufferUsageFlags, Extent2D, Fence, Format, Framebuffer, FramebufferCreateInfo,
-    ImageLayout, ImageView, Offset2D, PipelineBindPoint, PipelineStageFlags, RenderPass,
-    RenderPassBeginInfo, RenderPassCreateFlags, RenderPassCreateInfo, SampleCountFlags, SubmitInfo,
+    GraphicsPipelineCreateInfo, ImageLayout, ImageView, Offset2D, Pipeline, PipelineBindPoint,
+    PipelineCache, PipelineCreateFlags, PipelineLayout, PipelineLayoutCreateFlags,
+    PipelineLayoutCreateInfo, PipelineShaderStageCreateFlags, PipelineShaderStageCreateInfo,
+    PipelineStageFlags, RenderPass, RenderPassBeginInfo, RenderPassCreateFlags,
+    RenderPassCreateInfo, SampleCountFlags, ShaderStageFlags, SpecializationInfo, SubmitInfo,
     SubpassContents, SubpassDependency, SubpassDescription, SubpassDescriptionFlags,
     ATTACHMENT_UNUSED, SUBPASS_EXTERNAL,
 };
 
 use log::debug;
 
-use crate::setup::instance::VkContext;
+use crate::{graphics::shaders, setup::instance::VkContext};
 
 use super::{swapchain, util};
 
@@ -255,4 +258,65 @@ fn make_description(format: Format) -> AttachmentDescription {
         .format(format)
         .samples(SampleCountFlags::TYPE_1)
         .flags(AttachmentDescriptionFlags::empty())
+}
+
+fn make_pipeline(ctxt: &VkContext) -> Pipeline {
+    let pipeline_create_info = GraphicsPipelineCreateInfo::default()
+        .flags(PipelineCreateFlags::empty())
+        .stages(&fill_pipeline_shader_stage_infos())
+        .layout(create_pipeline_layout(ctxt))
+        .subpass(subpass)
+        .render_pass(render_pass)
+        .dynamic_state(dynamic_state)
+        .viewport_state(viewport_state)
+        .multisample_state(multisample_state)
+        .color_blend_state(color_blend_state)
+        .base_pipeline_index(base_pipeline_index)
+        .base_pipeline_handle(base_pipeline_handle)
+        .vertex_input_state(vertex_input_state)
+        .tessellation_state(tessellation_state)
+        .rasterization_state(rasterization_state)
+        .depth_stencil_state(depth_stencil_state)
+        .input_assembly_state(input_assembly_state);
+
+    match unsafe {
+        ctxt.logical_device.create_graphics_pipelines(
+            PipelineCache::null(),
+            &[pipeline_create_info],
+            None,
+        )
+    } {
+        Ok(pipelines) => pipelines.first().unwrap(),
+        Err(msg) => {
+            panic!("Unable to construct the graphics pipeline: {:?}", msg);
+        }
+    }
+}
+
+fn fill_pipeline_shader_stage_infos<'a>() -> Vec<PipelineShaderStageCreateInfo<'a>> {
+    // Yes I know.  unwrap bad.  This is speedrun territory.
+    let fragment_shader = shaders::shader_by_name("compositor.frag").unwrap();
+
+    let compositor_shader_stage_info = PipelineShaderStageCreateInfo::default()
+        .flags(PipelineShaderStageCreateFlags::empty())
+        .stage(ShaderStageFlags::FRAGMENT)
+        .module(fragment_shader.shader_module);
+
+    vec![compositor_shader_stage_info]
+}
+
+fn create_pipeline_layout(ctxt: &VkContext) -> PipelineLayout {
+    let create_info = PipelineLayoutCreateInfo::default()
+        .flags(PipelineLayoutCreateFlags::empty())
+        .set_layouts();
+
+    match unsafe {
+        ctxt.logical_device
+            .create_pipeline_layout(&create_info, None)
+    } {
+        Ok(layout) => layout,
+        Err(msg) => {
+            panic!("Failed to create the pipeline layout: {:?}", msg);
+        }
+    }
 }

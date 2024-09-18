@@ -1,7 +1,6 @@
 use ash::vk::{
     AccessFlags, BufferCreateInfo, BufferImageCopy, BufferUsageFlags, CommandBufferAllocateInfo, CommandBufferBeginInfo, CommandBufferLevel, CommandBufferResetFlags, CommandBufferUsageFlags, DependencyFlags, Extent3D, Fence, FenceCreateFlags, FenceCreateInfo, Format, Image, ImageAspectFlags, ImageCopy, ImageCreateFlags, ImageCreateInfo, ImageLayout, ImageMemoryBarrier, ImageSubresourceLayers, ImageSubresourceRange, ImageTiling, ImageType, ImageUsageFlags, MemoryAllocateInfo, MemoryBarrier, MemoryMapFlags, MemoryPropertyFlags, Offset3D, PipelineStageFlags, PresentInfoKHR, SampleCountFlags, Semaphore, SemaphoreCreateFlags, SemaphoreCreateInfo, SharingMode, SubmitInfo, QUEUE_FAMILY_IGNORED
 };
-use graphics::shaders::destroy_shaders;
 use graphics::{image::DustImage, swapchain};
 use graphics::transfer;
 use log::debug;
@@ -42,10 +41,6 @@ fn main() {
     let vk_context = instance::default(_xcb_ptr, &window);
     show_physical_memory_stats(&vk_context);
 
-    let shader_map = graphics::shaders::load_shaders();
-    
-
-    graphics::shaders::destroy_shaders(shader_map);
 
     let gradient = load_gradient(&vk_context);
     graphics::render::perform_simple_render(&vk_context, &gradient.view, gradient.format);
