@@ -3,14 +3,14 @@ use std::{thread::sleep, time::Duration};
 use ash::vk::{
     AccessFlags, AttachmentDescription, AttachmentDescriptionFlags, AttachmentLoadOp,
     AttachmentReference, AttachmentStoreOp, ClearColorValue, ClearValue, CommandBufferBeginInfo,
-    CommandBufferUsageFlags, Extent2D, Fence, Format, Framebuffer, FramebufferCreateInfo,
-    GraphicsPipelineCreateInfo, ImageLayout, ImageView, Offset2D, Pipeline, PipelineBindPoint,
-    PipelineCache, PipelineCreateFlags, PipelineLayout, PipelineLayoutCreateFlags,
-    PipelineLayoutCreateInfo, PipelineShaderStageCreateFlags, PipelineShaderStageCreateInfo,
-    PipelineStageFlags, RenderPass, RenderPassBeginInfo, RenderPassCreateFlags,
-    RenderPassCreateInfo, SampleCountFlags, ShaderStageFlags, SpecializationInfo, SubmitInfo,
-    SubpassContents, SubpassDependency, SubpassDescription, SubpassDescriptionFlags,
-    ATTACHMENT_UNUSED, SUBPASS_EXTERNAL,
+    CommandBufferUsageFlags, DescriptorSetLayout, Extent2D, Fence, Format, Framebuffer,
+    FramebufferCreateInfo, GraphicsPipelineCreateInfo, ImageLayout, ImageView, Offset2D, Pipeline,
+    PipelineBindPoint, PipelineCache, PipelineCreateFlags, PipelineLayout,
+    PipelineLayoutCreateFlags, PipelineLayoutCreateInfo, PipelineShaderStageCreateFlags,
+    PipelineShaderStageCreateInfo, PipelineStageFlags, RenderPass, RenderPassBeginInfo,
+    RenderPassCreateFlags, RenderPassCreateInfo, SampleCountFlags, ShaderStageFlags,
+    SpecializationInfo, SubmitInfo, SubpassContents, SubpassDependency, SubpassDescription,
+    SubpassDescriptionFlags, ATTACHMENT_UNUSED, SUBPASS_EXTERNAL,
 };
 
 use log::debug;
@@ -174,8 +174,8 @@ fn make_render_pass(ctxt: &VkContext, view_fmt: Format) -> RenderPass {
     let sc_image_desc = make_color_description(swapchain::get_swapchain_format().format);
     let bg_image_desc = make_input_description(view_fmt);
 
-    // let attachment_descs = vec![sc_image_desc, bg_image_desc];
-    let attachment_descs = vec![sc_image_desc];
+    let attachment_descs = vec![sc_image_desc, bg_image_desc];
+    // let attachment_descs = vec![sc_image_desc];
 
     let sc_image_attachment_ref = AttachmentReference::default()
         .attachment(0)
@@ -184,8 +184,8 @@ fn make_render_pass(ctxt: &VkContext, view_fmt: Format) -> RenderPass {
         .attachment(1)
         .layout(ImageLayout::READ_ONLY_OPTIMAL);
 
-    // let input_attachment_refs = [bg_image_attachment_ref];
-    let input_attachment_refs = [];
+    let input_attachment_refs = [bg_image_attachment_ref];
+    // let input_attachment_refs = [];
     let color_attachment_refs = [sc_image_attachment_ref];
 
     let subpass_one = make_subpass_description(&input_attachment_refs, &color_attachment_refs);
@@ -261,23 +261,25 @@ fn make_description(format: Format) -> AttachmentDescription {
 }
 
 fn make_pipeline(ctxt: &VkContext) -> Pipeline {
+    let shader_stage_infos = fill_pipeline_shader_stage_infos();
     let pipeline_create_info = GraphicsPipelineCreateInfo::default()
         .flags(PipelineCreateFlags::empty())
-        .stages(&fill_pipeline_shader_stage_infos())
+        .stages(&shader_stage_infos)
         .layout(create_pipeline_layout(ctxt))
-        .subpass(subpass)
-        .render_pass(render_pass)
-        .dynamic_state(dynamic_state)
-        .viewport_state(viewport_state)
-        .multisample_state(multisample_state)
-        .color_blend_state(color_blend_state)
-        .base_pipeline_index(base_pipeline_index)
-        .base_pipeline_handle(base_pipeline_handle)
-        .vertex_input_state(vertex_input_state)
-        .tessellation_state(tessellation_state)
-        .rasterization_state(rasterization_state)
-        .depth_stencil_state(depth_stencil_state)
-        .input_assembly_state(input_assembly_state);
+        // .subpass(subpass)
+        // .render_pass(render_pass)
+        // .dynamic_state(dynamic_state)
+        // .viewport_state(viewport_state)
+        // .multisample_state(multisample_state)
+        // .color_blend_state(color_blend_state)
+        // .base_pipeline_index(base_pipeline_index)
+        // .base_pipeline_handle(base_pipeline_handle)
+        // .vertex_input_state(vertex_input_state)
+        // .tessellation_state(tessellation_state)
+        // .rasterization_state(rasterization_state)
+        // .depth_stencil_state(depth_stencil_state)
+        // .input_assembly_state(input_assembly_state);
+    ;
 
     match unsafe {
         ctxt.logical_device.create_graphics_pipelines(
@@ -286,7 +288,7 @@ fn make_pipeline(ctxt: &VkContext) -> Pipeline {
             None,
         )
     } {
-        Ok(pipelines) => pipelines.first().unwrap(),
+        Ok(pipelines) => *pipelines.first().unwrap(),
         Err(msg) => {
             panic!("Unable to construct the graphics pipeline: {:?}", msg);
         }
@@ -308,7 +310,8 @@ fn fill_pipeline_shader_stage_infos<'a>() -> Vec<PipelineShaderStageCreateInfo<'
 fn create_pipeline_layout(ctxt: &VkContext) -> PipelineLayout {
     let create_info = PipelineLayoutCreateInfo::default()
         .flags(PipelineLayoutCreateFlags::empty())
-        .set_layouts();
+        .push_constant_ranges(&[])
+        .set_layouts(set_layouts);
 
     match unsafe {
         ctxt.logical_device
@@ -320,3 +323,5 @@ fn create_pipeline_layout(ctxt: &VkContext) -> PipelineLayout {
         }
     }
 }
+
+fn create_set_layouts(ctxt: &VkContext) -> Vec<DescriptorSetLayout> {}
