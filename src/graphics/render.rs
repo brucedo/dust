@@ -44,7 +44,7 @@ pub fn perform_simple_render(ctxt: &VkContext, bg_image_view: &ImageView, view_f
     // let clear_values = [clear_value, clear_value];
     let clear_values = [clear_value];
 
-    let pipeline = make_pipeline(ctxt);
+    let pipeline = make_pipeline(ctxt, render_pass);
 
     let buffer = crate::graphics::pools::reserve_graphics_buffer(ctxt);
 
@@ -265,14 +265,14 @@ fn make_description(format: Format) -> AttachmentDescription {
         .flags(AttachmentDescriptionFlags::empty())
 }
 
-fn make_pipeline(ctxt: &VkContext) -> Pipeline {
+fn make_pipeline(ctxt: &VkContext, render_pass: RenderPass) -> Pipeline {
     let shader_stage_infos = fill_pipeline_shader_stage_infos();
     let pipeline_create_info = GraphicsPipelineCreateInfo::default()
         .flags(PipelineCreateFlags::empty())
         .stages(&shader_stage_infos)
         .layout(create_pipeline_layout(ctxt))
         // .subpass(subpass)
-        // .render_pass(render_pass)
+        .render_pass(render_pass)
         // .dynamic_state(dynamic_state)
         // .viewport_state(viewport_state)
         // .multisample_state(multisample_state)
@@ -303,7 +303,6 @@ fn make_pipeline(ctxt: &VkContext) -> Pipeline {
 fn fill_pipeline_shader_stage_infos<'a>() -> Vec<PipelineShaderStageCreateInfo<'a>> {
     // Yes I know.  unwrap bad.  This is speedrun territory.
     let fragment_shader = shaders::shader_by_name("compositor.frag").unwrap();
-    let fragment_shader_name = CString::new("compositor.frag").unwrap();
 
     let compositor_shader_stage_info = PipelineShaderStageCreateInfo::default()
         .name(fragment_shader.name.as_c_str())

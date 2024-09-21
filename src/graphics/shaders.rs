@@ -3,6 +3,7 @@ use std::{
     collections::HashMap,
     ffi::CString,
     fs::read_dir,
+    io::Read,
     path::Path,
     sync::{LazyLock, OnceLock, RwLock},
 };
@@ -98,16 +99,21 @@ fn load_shader(file_name: &mut File) -> Result<Vec<u32>, Error> {
 
     let quad_count = file_size / 4;
 
+    debug!("Byte count of file: {}", file_size);
+
     if quad_count % 4 != 0 {
+        error!("The shader file should be exactly a multiple of four bytes long.  It ain't.");
         Err(std::io::Error::from(ErrorKind::UnexpectedEof))
     } else {
         let mut shader_bytes = Vec::with_capacity(quad_count as usize);
 
-        let read_buffer = Vec::<u8>::with_capacity(file_size as usize);
+        let mut read_buffer = Vec::<u8>::with_capacity(file_size as usize);
+
+        file_name.read_to_end(&mut read_buffer)?;
 
         for chunk in read_buffer.chunks_exact(4) {
             let array_ref: &[u8; 4] = chunk.try_into().unwrap();
-            shader_bytes.push(u32::from_be_bytes(*array_ref));
+            shader_bytes.push(u32::from_ne_bytes(*array_ref));
         }
 
         Ok(shader_bytes)
@@ -158,9 +164,12 @@ fn destroy_shaders(mut shader_map: HashMap<String, ShaderWrapper>) {
 }
 
 fn make_shader_module(bytecode: &[u32]) -> Result<ShaderModule, DustError> {
+    debug!("Bytecode input size: {}", bytecode.len());
     let create_info = ShaderModuleCreateInfo::default()
         .flags(ShaderModuleCreateFlags::empty())
         .code(bytecode);
+
+    debug!("Code size: {}", create_info.code_size);
 
     match LOGICAL_DEVICE.get() {
         Some(device) => match unsafe { device.create_shader_module(&create_info, None) } {
@@ -194,6 +203,7 @@ fn process_shader_directory(path: &Path, storage: &mut HashMap<String, ShaderWra
 }
 
 fn process_shader_file(path: &Path, storage: &mut HashMap<String, ShaderWrapper>) {
+    debug!("Shader file being processed: {:?}", path);
     if let Ok(mut file) = File::open(path) {
         let shader_contents = match load_shader(&mut file) {
             Ok(vec) => vec,
@@ -205,6 +215,8 @@ fn process_shader_file(path: &Path, storage: &mut HashMap<String, ShaderWrapper>
                 return;
             }
         };
+
+        debug!("Shader contents size: {}", shader_contents.len());
 
         let module = match make_shader_module(&shader_contents) {
             Ok(module) => module,
