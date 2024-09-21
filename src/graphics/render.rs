@@ -1,16 +1,19 @@
 use std::{thread::sleep, time::Duration};
 
+use std::ffi::{CStr, CString};
+
 use ash::vk::{
     AccessFlags, AttachmentDescription, AttachmentDescriptionFlags, AttachmentLoadOp,
     AttachmentReference, AttachmentStoreOp, ClearColorValue, ClearValue, CommandBufferBeginInfo,
-    CommandBufferUsageFlags, DescriptorSetLayout, Extent2D, Fence, Format, Framebuffer,
-    FramebufferCreateInfo, GraphicsPipelineCreateInfo, ImageLayout, ImageView, Offset2D, Pipeline,
-    PipelineBindPoint, PipelineCache, PipelineCreateFlags, PipelineLayout,
-    PipelineLayoutCreateFlags, PipelineLayoutCreateInfo, PipelineShaderStageCreateFlags,
-    PipelineShaderStageCreateInfo, PipelineStageFlags, RenderPass, RenderPassBeginInfo,
-    RenderPassCreateFlags, RenderPassCreateInfo, SampleCountFlags, ShaderStageFlags,
-    SpecializationInfo, SubmitInfo, SubpassContents, SubpassDependency, SubpassDescription,
-    SubpassDescriptionFlags, ATTACHMENT_UNUSED, SUBPASS_EXTERNAL,
+    CommandBufferUsageFlags, DescriptorSetLayout, DescriptorSetLayoutCreateFlags,
+    DescriptorSetLayoutCreateInfo, Extent2D, Fence, Format, Framebuffer, FramebufferCreateInfo,
+    GraphicsPipelineCreateInfo, ImageLayout, ImageView, Offset2D, Pipeline, PipelineBindPoint,
+    PipelineCache, PipelineCreateFlags, PipelineLayout, PipelineLayoutCreateFlags,
+    PipelineLayoutCreateInfo, PipelineShaderStageCreateFlags, PipelineShaderStageCreateInfo,
+    PipelineStageFlags, RenderPass, RenderPassBeginInfo, RenderPassCreateFlags,
+    RenderPassCreateInfo, SampleCountFlags, ShaderStageFlags, SpecializationInfo, SubmitInfo,
+    SubpassContents, SubpassDependency, SubpassDescription, SubpassDescriptionFlags,
+    ATTACHMENT_UNUSED, SUBPASS_EXTERNAL,
 };
 
 use log::debug;
@@ -26,8 +29,8 @@ pub fn perform_simple_render(ctxt: &VkContext, bg_image_view: &ImageView, view_f
     let (image_index, image, optimal) =
         swapchain::next_swapchain_image(signal_acquired, Fence::null());
 
-    // let attachments = vec![*image, *bg_image_view];
-    let attachments = vec![*image];
+    let attachments = vec![*image, *bg_image_view];
+    // let attachments = vec![*image];
 
     let render_pass = make_render_pass(ctxt, view_fmt);
     let framebuffer = make_framebuffer(ctxt, render_pass, &attachments);
@@ -40,6 +43,8 @@ pub fn perform_simple_render(ctxt: &VkContext, bg_image_view: &ImageView, view_f
     clear_value.color = clear_color;
     // let clear_values = [clear_value, clear_value];
     let clear_values = [clear_value];
+
+    let pipeline = make_pipeline(ctxt);
 
     let buffer = crate::graphics::pools::reserve_graphics_buffer(ctxt);
 
@@ -298,8 +303,10 @@ fn make_pipeline(ctxt: &VkContext) -> Pipeline {
 fn fill_pipeline_shader_stage_infos<'a>() -> Vec<PipelineShaderStageCreateInfo<'a>> {
     // Yes I know.  unwrap bad.  This is speedrun territory.
     let fragment_shader = shaders::shader_by_name("compositor.frag").unwrap();
+    let fragment_shader_name = CString::new("compositor.frag").unwrap();
 
     let compositor_shader_stage_info = PipelineShaderStageCreateInfo::default()
+        .name(fragment_shader_name.as_c_str())
         .flags(PipelineShaderStageCreateFlags::empty())
         .stage(ShaderStageFlags::FRAGMENT)
         .module(fragment_shader.shader_module);
@@ -311,7 +318,7 @@ fn create_pipeline_layout(ctxt: &VkContext) -> PipelineLayout {
     let create_info = PipelineLayoutCreateInfo::default()
         .flags(PipelineLayoutCreateFlags::empty())
         .push_constant_ranges(&[])
-        .set_layouts(set_layouts);
+        .set_layouts(&[]);
 
     match unsafe {
         ctxt.logical_device
@@ -323,5 +330,3 @@ fn create_pipeline_layout(ctxt: &VkContext) -> PipelineLayout {
         }
     }
 }
-
-fn create_set_layouts(ctxt: &VkContext) -> Vec<DescriptorSetLayout> {}
