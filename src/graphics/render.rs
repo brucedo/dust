@@ -306,7 +306,7 @@ fn fill_pipeline_shader_stage_infos<'a>() -> Vec<PipelineShaderStageCreateInfo<'
     let fragment_shader_name = CString::new("compositor.frag").unwrap();
 
     let compositor_shader_stage_info = PipelineShaderStageCreateInfo::default()
-        .name(fragment_shader_name.as_c_str())
+        .name(fragment_shader.name.as_c_str())
         .flags(PipelineShaderStageCreateFlags::empty())
         .stage(ShaderStageFlags::FRAGMENT)
         .module(fragment_shader.shader_module);

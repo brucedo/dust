@@ -1,6 +1,7 @@
 use std::{
     borrow::BorrowMut,
     collections::HashMap,
+    ffi::CString,
     fs::read_dir,
     path::Path,
     sync::{LazyLock, OnceLock, RwLock},
@@ -75,7 +76,7 @@ pub enum ShaderType {
 
 pub struct ShaderWrapper {
     pub shader_module: ShaderModule,
-    pub name: String,
+    pub name: CString,
     pub shader_type: ShaderType,
 }
 
@@ -250,7 +251,8 @@ fn process_shader_file(path: &Path, storage: &mut HashMap<String, ShaderWrapper>
                     ShaderWrapper {
                         shader_type,
                         shader_module: module,
-                        name,
+                        // TODO: Come up with real error handling here, fucko
+                        name: CString::new(name).unwrap(),
                     },
                 );
             }
