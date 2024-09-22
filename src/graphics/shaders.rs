@@ -101,7 +101,7 @@ fn load_shader(file_name: &mut File) -> Result<Vec<u32>, Error> {
 
     debug!("Byte count of file: {}", file_size);
 
-    if quad_count % 4 != 0 {
+    if file_size % 4 != 0 {
         error!("The shader file should be exactly a multiple of four bytes long.  It ain't.");
         Err(std::io::Error::from(ErrorKind::UnexpectedEof))
     } else {

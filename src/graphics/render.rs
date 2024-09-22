@@ -8,14 +8,17 @@ use ash::vk::{
     CommandBufferUsageFlags, CullModeFlags, DescriptorSetLayout, DescriptorSetLayoutCreateFlags,
     DescriptorSetLayoutCreateInfo, Extent2D, Fence, Format, Framebuffer, FramebufferCreateInfo,
     FrontFace, GraphicsPipelineCreateInfo, ImageLayout, ImageView, Offset2D, Pipeline,
-    PipelineBindPoint, PipelineCache, PipelineCreateFlags, PipelineLayout,
-    PipelineLayoutCreateFlags, PipelineLayoutCreateInfo, PipelineRasterizationStateCreateFlags,
+    PipelineBindPoint, PipelineCache, PipelineCreateFlags, PipelineInputAssemblyStateCreateFlags,
+    PipelineInputAssemblyStateCreateInfo, PipelineLayout, PipelineLayoutCreateFlags,
+    PipelineLayoutCreateInfo, PipelineMultisampleStateCreateFlags,
+    PipelineMultisampleStateCreateInfo, PipelineRasterizationStateCreateFlags,
     PipelineRasterizationStateCreateInfo, PipelineShaderStageCreateFlags,
-    PipelineShaderStageCreateInfo, PipelineStageFlags, PipelineViewportStateCreateFlags,
-    PipelineViewportStateCreateInfo, PolygonMode, Rect2D, RenderPass, RenderPassBeginInfo,
-    RenderPassCreateFlags, RenderPassCreateInfo, SampleCountFlags, ShaderStageFlags,
-    SpecializationInfo, SubmitInfo, SubpassContents, SubpassDependency, SubpassDescription,
-    SubpassDescriptionFlags, Viewport, ATTACHMENT_UNUSED, SUBPASS_EXTERNAL,
+    PipelineShaderStageCreateInfo, PipelineStageFlags, PipelineVertexInputStateCreateFlags,
+    PipelineVertexInputStateCreateInfo, PipelineViewportStateCreateFlags,
+    PipelineViewportStateCreateInfo, PolygonMode, PrimitiveTopology, Rect2D, RenderPass,
+    RenderPassBeginInfo, RenderPassCreateFlags, RenderPassCreateInfo, SampleCountFlags,
+    ShaderStageFlags, SpecializationInfo, SubmitInfo, SubpassContents, SubpassDependency,
+    SubpassDescription, SubpassDescriptionFlags, Viewport, ATTACHMENT_UNUSED, SUBPASS_EXTERNAL,
 };
 
 use log::debug;
@@ -46,7 +49,8 @@ pub fn perform_simple_render(ctxt: &VkContext, bg_image_view: &ImageView, view_f
     // let clear_values = [clear_value, clear_value];
     let clear_values = [clear_value];
 
-    let pipeline = make_pipeline(ctxt, render_pass);
+    let pipeline_layout = create_pipeline_layout(ctxt);
+    let pipeline = make_pipeline(ctxt, render_pass, pipeline_layout);
 
     let buffer = crate::graphics::pools::reserve_graphics_buffer(ctxt);
 
@@ -84,11 +88,16 @@ pub fn perform_simple_render(ctxt: &VkContext, bg_image_view: &ImageView, view_f
             })
             .clear_values(&clear_values);
 
+        ctxt.logical_device
+            .cmd_bind_pipeline(buffer, PipelineBindPoint::GRAPHICS, pipeline);
+
         ctxt.logical_device.cmd_begin_render_pass(
             buffer,
             &render_pass_begin,
             SubpassContents::INLINE,
         );
+
+        ctxt.logical_device.cmd_draw(buffer, 3, 1, 0, 0);
 
         ctxt.logical_device.cmd_end_render_pass(buffer);
 
@@ -150,6 +159,9 @@ pub fn perform_simple_render(ctxt: &VkContext, bg_image_view: &ImageView, view_f
         ctxt.logical_device.destroy_semaphore(render_complete, None);
         ctxt.logical_device.destroy_framebuffer(framebuffer, None);
         ctxt.logical_device.destroy_render_pass(render_pass, None);
+        ctxt.logical_device
+            .destroy_pipeline_layout(pipeline_layout, None);
+        ctxt.logical_device.destroy_pipeline(pipeline, None);
     }
 }
 
@@ -267,9 +279,15 @@ fn make_description(format: Format) -> AttachmentDescription {
         .flags(AttachmentDescriptionFlags::empty())
 }
 
-fn make_pipeline(ctxt: &VkContext, render_pass: RenderPass) -> Pipeline {
+fn make_pipeline(
+    ctxt: &VkContext,
+    render_pass: RenderPass,
+    pipeline_layout: PipelineLayout,
+) -> Pipeline {
     let shader_stage_infos = fill_pipeline_shader_stage_infos();
     let rasterization_state_info = create_rasterization_state();
+    let input_assembly_state_info = create_input_assembly_state();
+    let vertex_input_state_info = create_vertex_input_state();
 
     let swapchain_geometry = Rect2D::default()
         .extent(Extent2D::default().height(1080).width(1920))
@@ -285,25 +303,25 @@ fn make_pipeline(ctxt: &VkContext, render_pass: RenderPass) -> Pipeline {
     let fullscreen_viewport = vec![viewport_geometry];
 
     let viewport_state = create_viewport_state(&fullscreen_scissors, &fullscreen_viewport);
+    // let multisample_state = create_multisample_state();
 
     let pipeline_create_info = GraphicsPipelineCreateInfo::default()
         .flags(PipelineCreateFlags::empty())
         .stages(&shader_stage_infos)
-        .layout(create_pipeline_layout(ctxt))
+        .layout(pipeline_layout)
         // .subpass(subpass)
         .render_pass(render_pass)
         // .dynamic_state(dynamic_state)
         .viewport_state(&viewport_state)
-        // .multisample_state(multisample_state)
+        // .multisample_state(&multisample_state)
         // .color_blend_state(color_blend_state)
         // .base_pipeline_index(base_pipeline_index)
         // .base_pipeline_handle(base_pipeline_handle)
-        // .vertex_input_state(vertex_input_state)
+        .vertex_input_state(&vertex_input_state_info)
         // .tessellation_state(tessellation_state)
         .rasterization_state(&rasterization_state_info)
         // .depth_stencil_state(depth_stencil_state)
-        // .input_assembly_state(input_assembly_state);
-    ;
+        .input_assembly_state(&input_assembly_state_info);
 
     match unsafe {
         ctxt.logical_device.create_graphics_pipelines(
@@ -322,6 +340,13 @@ fn make_pipeline(ctxt: &VkContext, render_pass: RenderPass) -> Pipeline {
 fn fill_pipeline_shader_stage_infos<'a>() -> Vec<PipelineShaderStageCreateInfo<'a>> {
     // Yes I know.  unwrap bad.  This is speedrun territory.
     let fragment_shader = shaders::shader_by_name("compositor.frag").unwrap();
+    let vertex_shader = shaders::shader_by_name("passthrough.vertex").unwrap();
+
+    let vertex_shader_stage_info = PipelineShaderStageCreateInfo::default()
+        .name(vertex_shader.name.as_c_str())
+        .flags(PipelineShaderStageCreateFlags::empty())
+        .stage(ShaderStageFlags::VERTEX)
+        .module(vertex_shader.shader_module);
 
     let compositor_shader_stage_info = PipelineShaderStageCreateInfo::default()
         .name(fragment_shader.name.as_c_str())
@@ -329,7 +354,7 @@ fn fill_pipeline_shader_stage_infos<'a>() -> Vec<PipelineShaderStageCreateInfo<'
         .stage(ShaderStageFlags::FRAGMENT)
         .module(fragment_shader.shader_module);
 
-    vec![compositor_shader_stage_info]
+    vec![vertex_shader_stage_info, compositor_shader_stage_info]
 }
 
 fn create_pipeline_layout(ctxt: &VkContext) -> PipelineLayout {
@@ -356,7 +381,7 @@ fn create_rasterization_state<'a>() -> PipelineRasterizationStateCreateInfo<'a> 
         .front_face(FrontFace::CLOCKWISE)
         .polygon_mode(PolygonMode::FILL)
         .depth_bias_enable(false)
-        .rasterizer_discard_enable(false)
+        .rasterizer_discard_enable(true)
         .line_width(1.0)
 }
 
@@ -370,4 +395,18 @@ fn create_viewport_state<'a>(
         .scissor_count(1)
         .viewports(viewport_geometry)
         .viewport_count(1)
+}
+
+fn create_input_assembly_state<'a>() -> PipelineInputAssemblyStateCreateInfo<'a> {
+    PipelineInputAssemblyStateCreateInfo::default()
+        .flags(PipelineInputAssemblyStateCreateFlags::empty())
+        .topology(PrimitiveTopology::TRIANGLE_LIST)
+        .primitive_restart_enable(false)
+}
+
+fn create_vertex_input_state<'a>() -> PipelineVertexInputStateCreateInfo<'a> {
+    PipelineVertexInputStateCreateInfo::default()
+        .flags(PipelineVertexInputStateCreateFlags::empty())
+        .vertex_binding_descriptions(&[])
+        .vertex_attribute_descriptions(&[])
 }
