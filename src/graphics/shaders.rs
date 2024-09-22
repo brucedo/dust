@@ -264,7 +264,7 @@ fn process_shader_file(path: &Path, storage: &mut HashMap<String, ShaderWrapper>
                         shader_type,
                         shader_module: module,
                         // TODO: Come up with real error handling here, fucko
-                        name: CString::new(name).unwrap(),
+                        name: CString::new(String::from("main")).unwrap(),
                     },
                 );
             }

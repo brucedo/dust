@@ -5,15 +5,17 @@ use std::ffi::{CStr, CString};
 use ash::vk::{
     AccessFlags, AttachmentDescription, AttachmentDescriptionFlags, AttachmentLoadOp,
     AttachmentReference, AttachmentStoreOp, ClearColorValue, ClearValue, CommandBufferBeginInfo,
-    CommandBufferUsageFlags, DescriptorSetLayout, DescriptorSetLayoutCreateFlags,
+    CommandBufferUsageFlags, CullModeFlags, DescriptorSetLayout, DescriptorSetLayoutCreateFlags,
     DescriptorSetLayoutCreateInfo, Extent2D, Fence, Format, Framebuffer, FramebufferCreateInfo,
-    GraphicsPipelineCreateInfo, ImageLayout, ImageView, Offset2D, Pipeline, PipelineBindPoint,
-    PipelineCache, PipelineCreateFlags, PipelineLayout, PipelineLayoutCreateFlags,
-    PipelineLayoutCreateInfo, PipelineShaderStageCreateFlags, PipelineShaderStageCreateInfo,
-    PipelineStageFlags, RenderPass, RenderPassBeginInfo, RenderPassCreateFlags,
-    RenderPassCreateInfo, SampleCountFlags, ShaderStageFlags, SpecializationInfo, SubmitInfo,
-    SubpassContents, SubpassDependency, SubpassDescription, SubpassDescriptionFlags,
-    ATTACHMENT_UNUSED, SUBPASS_EXTERNAL,
+    FrontFace, GraphicsPipelineCreateInfo, ImageLayout, ImageView, Offset2D, Pipeline,
+    PipelineBindPoint, PipelineCache, PipelineCreateFlags, PipelineLayout,
+    PipelineLayoutCreateFlags, PipelineLayoutCreateInfo, PipelineRasterizationStateCreateFlags,
+    PipelineRasterizationStateCreateInfo, PipelineShaderStageCreateFlags,
+    PipelineShaderStageCreateInfo, PipelineStageFlags, PipelineViewportStateCreateFlags,
+    PipelineViewportStateCreateInfo, PolygonMode, Rect2D, RenderPass, RenderPassBeginInfo,
+    RenderPassCreateFlags, RenderPassCreateInfo, SampleCountFlags, ShaderStageFlags,
+    SpecializationInfo, SubmitInfo, SubpassContents, SubpassDependency, SubpassDescription,
+    SubpassDescriptionFlags, Viewport, ATTACHMENT_UNUSED, SUBPASS_EXTERNAL,
 };
 
 use log::debug;
@@ -267,6 +269,23 @@ fn make_description(format: Format) -> AttachmentDescription {
 
 fn make_pipeline(ctxt: &VkContext, render_pass: RenderPass) -> Pipeline {
     let shader_stage_infos = fill_pipeline_shader_stage_infos();
+    let rasterization_state_info = create_rasterization_state();
+
+    let swapchain_geometry = Rect2D::default()
+        .extent(Extent2D::default().height(1080).width(1920))
+        .offset(Offset2D::default().y(0).x(0));
+
+    let viewport_geometry = Viewport::default()
+        .width(1.0f32)
+        .height(1.0f32)
+        .x(0.0)
+        .y(0.0);
+
+    let fullscreen_scissors = vec![swapchain_geometry];
+    let fullscreen_viewport = vec![viewport_geometry];
+
+    let viewport_state = create_viewport_state(&fullscreen_scissors, &fullscreen_viewport);
+
     let pipeline_create_info = GraphicsPipelineCreateInfo::default()
         .flags(PipelineCreateFlags::empty())
         .stages(&shader_stage_infos)
@@ -274,14 +293,14 @@ fn make_pipeline(ctxt: &VkContext, render_pass: RenderPass) -> Pipeline {
         // .subpass(subpass)
         .render_pass(render_pass)
         // .dynamic_state(dynamic_state)
-        // .viewport_state(viewport_state)
+        .viewport_state(&viewport_state)
         // .multisample_state(multisample_state)
         // .color_blend_state(color_blend_state)
         // .base_pipeline_index(base_pipeline_index)
         // .base_pipeline_handle(base_pipeline_handle)
         // .vertex_input_state(vertex_input_state)
         // .tessellation_state(tessellation_state)
-        // .rasterization_state(rasterization_state)
+        .rasterization_state(&rasterization_state_info)
         // .depth_stencil_state(depth_stencil_state)
         // .input_assembly_state(input_assembly_state);
     ;
@@ -328,4 +347,27 @@ fn create_pipeline_layout(ctxt: &VkContext) -> PipelineLayout {
             panic!("Failed to create the pipeline layout: {:?}", msg);
         }
     }
+}
+
+fn create_rasterization_state<'a>() -> PipelineRasterizationStateCreateInfo<'a> {
+    PipelineRasterizationStateCreateInfo::default()
+        .flags(PipelineRasterizationStateCreateFlags::empty())
+        .cull_mode(CullModeFlags::BACK)
+        .front_face(FrontFace::CLOCKWISE)
+        .polygon_mode(PolygonMode::FILL)
+        .depth_bias_enable(false)
+        .rasterizer_discard_enable(false)
+        .line_width(1.0)
+}
+
+fn create_viewport_state<'a>(
+    dest_image_geometry: &'a [Rect2D],
+    viewport_geometry: &'a [Viewport],
+) -> PipelineViewportStateCreateInfo<'a> {
+    PipelineViewportStateCreateInfo::default()
+        .flags(PipelineViewportStateCreateFlags::empty())
+        .scissors(dest_image_geometry)
+        .scissor_count(1)
+        .viewports(viewport_geometry)
+        .viewport_count(1)
 }
