@@ -88,14 +88,14 @@ pub fn perform_simple_render(ctxt: &VkContext, bg_image_view: &ImageView, view_f
             })
             .clear_values(&clear_values);
 
-        ctxt.logical_device
-            .cmd_bind_pipeline(buffer, PipelineBindPoint::GRAPHICS, pipeline);
-
         ctxt.logical_device.cmd_begin_render_pass(
             buffer,
             &render_pass_begin,
             SubpassContents::INLINE,
         );
+
+        ctxt.logical_device
+            .cmd_bind_pipeline(buffer, PipelineBindPoint::GRAPHICS, pipeline);
 
         ctxt.logical_device.cmd_draw(buffer, 3, 1, 0, 0);
 
@@ -201,7 +201,7 @@ fn make_render_pass(ctxt: &VkContext, view_fmt: Format) -> RenderPass {
         .layout(ImageLayout::COLOR_ATTACHMENT_OPTIMAL);
     let bg_image_attachment_ref = AttachmentReference::default()
         .attachment(1)
-        .layout(ImageLayout::READ_ONLY_OPTIMAL);
+        .layout(ImageLayout::SHADER_READ_ONLY_OPTIMAL);
 
     let input_attachment_refs = [bg_image_attachment_ref];
     // let input_attachment_refs = [];
@@ -259,7 +259,7 @@ fn make_input_description(format: Format) -> AttachmentDescription {
         .load_op(AttachmentLoadOp::LOAD)
         .store_op(AttachmentStoreOp::NONE)
         .initial_layout(ImageLayout::TRANSFER_SRC_OPTIMAL)
-        .final_layout(ImageLayout::TRANSFER_SRC_OPTIMAL)
+        .final_layout(ImageLayout::SHADER_READ_ONLY_OPTIMAL)
 }
 
 fn make_color_description(format: Format) -> AttachmentDescription {
