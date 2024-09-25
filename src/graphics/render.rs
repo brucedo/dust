@@ -258,7 +258,7 @@ fn make_input_description(format: Format) -> AttachmentDescription {
     make_description(format)
         .load_op(AttachmentLoadOp::LOAD)
         .store_op(AttachmentStoreOp::NONE)
-        .initial_layout(ImageLayout::TRANSFER_SRC_OPTIMAL)
+        .initial_layout(ImageLayout::SHADER_READ_ONLY_OPTIMAL)
         .final_layout(ImageLayout::SHADER_READ_ONLY_OPTIMAL)
 }
 
@@ -381,7 +381,7 @@ fn create_rasterization_state<'a>() -> PipelineRasterizationStateCreateInfo<'a> 
         .front_face(FrontFace::CLOCKWISE)
         .polygon_mode(PolygonMode::FILL)
         .depth_bias_enable(false)
-        .rasterizer_discard_enable(true)
+        .rasterizer_discard_enable(false)
         .line_width(1.0)
 }
 
