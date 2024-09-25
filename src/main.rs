@@ -357,7 +357,7 @@ fn load_gradient(ctxt: &VkContext) -> DustImage {
         &host_buffer,
         ctxt,
         target_image,
-        ImageLayout::TRANSFER_SRC_OPTIMAL,
+        ImageLayout::SHADER_READ_ONLY_OPTIMAL,
     )
 }
 

@@ -1,24 +1,21 @@
 use std::{thread::sleep, time::Duration};
 
-use std::ffi::{CStr, CString};
-
 use ash::vk::{
     AccessFlags, AttachmentDescription, AttachmentDescriptionFlags, AttachmentLoadOp,
     AttachmentReference, AttachmentStoreOp, ClearColorValue, ClearValue, CommandBufferBeginInfo,
-    CommandBufferUsageFlags, CullModeFlags, DescriptorSetLayout, DescriptorSetLayoutCreateFlags,
-    DescriptorSetLayoutCreateInfo, Extent2D, Fence, Format, Framebuffer, FramebufferCreateInfo,
-    FrontFace, GraphicsPipelineCreateInfo, ImageLayout, ImageView, Offset2D, Pipeline,
-    PipelineBindPoint, PipelineCache, PipelineCreateFlags, PipelineInputAssemblyStateCreateFlags,
-    PipelineInputAssemblyStateCreateInfo, PipelineLayout, PipelineLayoutCreateFlags,
-    PipelineLayoutCreateInfo, PipelineMultisampleStateCreateFlags,
+    CommandBufferUsageFlags, CullModeFlags, Extent2D, Fence, Format, Framebuffer,
+    FramebufferCreateInfo, FrontFace, GraphicsPipelineCreateInfo, ImageLayout, ImageView, Offset2D,
+    Pipeline, PipelineBindPoint, PipelineCache, PipelineCreateFlags,
+    PipelineInputAssemblyStateCreateFlags, PipelineInputAssemblyStateCreateInfo, PipelineLayout,
+    PipelineLayoutCreateFlags, PipelineLayoutCreateInfo, PipelineMultisampleStateCreateFlags,
     PipelineMultisampleStateCreateInfo, PipelineRasterizationStateCreateFlags,
     PipelineRasterizationStateCreateInfo, PipelineShaderStageCreateFlags,
     PipelineShaderStageCreateInfo, PipelineStageFlags, PipelineVertexInputStateCreateFlags,
     PipelineVertexInputStateCreateInfo, PipelineViewportStateCreateFlags,
     PipelineViewportStateCreateInfo, PolygonMode, PrimitiveTopology, Rect2D, RenderPass,
     RenderPassBeginInfo, RenderPassCreateFlags, RenderPassCreateInfo, SampleCountFlags,
-    ShaderStageFlags, SpecializationInfo, SubmitInfo, SubpassContents, SubpassDependency,
-    SubpassDescription, SubpassDescriptionFlags, Viewport, ATTACHMENT_UNUSED, SUBPASS_EXTERNAL,
+    ShaderStageFlags, SubmitInfo, SubpassContents, SubpassDependency, SubpassDescription,
+    SubpassDescriptionFlags, Viewport, SUBPASS_EXTERNAL,
 };
 
 use log::debug;
@@ -31,7 +28,7 @@ pub fn perform_simple_render(ctxt: &VkContext, bg_image_view: &ImageView, view_f
     // let block_till_acquired = util::create_fence(ctxt);
     let signal_acquired = util::create_binary_semaphore(ctxt);
 
-    let (image_index, image, optimal) =
+    let (image_index, image, _optimal) =
         swapchain::next_swapchain_image(signal_acquired, Fence::null());
 
     let attachments = vec![*image, *bg_image_view];
@@ -303,17 +300,17 @@ fn make_pipeline(
     let fullscreen_viewport = vec![viewport_geometry];
 
     let viewport_state = create_viewport_state(&fullscreen_scissors, &fullscreen_viewport);
-    // let multisample_state = create_multisample_state();
+    let multisample_state = create_multisample_state();
 
     let pipeline_create_info = GraphicsPipelineCreateInfo::default()
         .flags(PipelineCreateFlags::empty())
         .stages(&shader_stage_infos)
         .layout(pipeline_layout)
-        // .subpass(subpass)
+        .subpass(0)
         .render_pass(render_pass)
         // .dynamic_state(dynamic_state)
         .viewport_state(&viewport_state)
-        // .multisample_state(&multisample_state)
+        .multisample_state(&multisample_state)
         // .color_blend_state(color_blend_state)
         // .base_pipeline_index(base_pipeline_index)
         // .base_pipeline_handle(base_pipeline_handle)
@@ -409,4 +406,14 @@ fn create_vertex_input_state<'a>() -> PipelineVertexInputStateCreateInfo<'a> {
         .flags(PipelineVertexInputStateCreateFlags::empty())
         .vertex_binding_descriptions(&[])
         .vertex_attribute_descriptions(&[])
+}
+
+fn create_multisample_state<'a>() -> PipelineMultisampleStateCreateInfo<'a> {
+    PipelineMultisampleStateCreateInfo::default()
+        .flags(PipelineMultisampleStateCreateFlags::empty())
+        .sample_shading_enable(false)
+        .rasterization_samples(SampleCountFlags::TYPE_1)
+        .alpha_to_one_enable(false)
+        .alpha_to_coverage_enable(false)
+        .min_sample_shading(1.0)
 }
