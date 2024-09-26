@@ -2,10 +2,10 @@ use std::{thread::sleep, time::Duration};
 
 use ash::vk::{
     AccessFlags, AttachmentDescription, AttachmentDescriptionFlags, AttachmentLoadOp,
-    AttachmentReference, AttachmentStoreOp, ClearColorValue, ClearValue, CommandBufferBeginInfo,
-    CommandBufferUsageFlags, CullModeFlags, Extent2D, Fence, Format, Framebuffer,
-    FramebufferCreateInfo, FrontFace, GraphicsPipelineCreateInfo, ImageLayout, ImageView, Offset2D,
-    Pipeline, PipelineBindPoint, PipelineCache, PipelineCreateFlags,
+    AttachmentReference, AttachmentStoreOp, ClearColorValue, ClearDepthStencilValue, ClearValue,
+    CommandBufferBeginInfo, CommandBufferUsageFlags, CullModeFlags, Extent2D, Fence, Format,
+    Framebuffer, FramebufferCreateInfo, FrontFace, GraphicsPipelineCreateInfo, ImageLayout,
+    ImageView, Offset2D, Pipeline, PipelineBindPoint, PipelineCache, PipelineCreateFlags,
     PipelineInputAssemblyStateCreateFlags, PipelineInputAssemblyStateCreateInfo, PipelineLayout,
     PipelineLayoutCreateFlags, PipelineLayoutCreateInfo, PipelineMultisampleStateCreateFlags,
     PipelineMultisampleStateCreateInfo, PipelineRasterizationStateCreateFlags,
@@ -41,6 +41,9 @@ pub fn perform_simple_render(ctxt: &VkContext, bg_image_view: &ImageView, view_f
 
     let mut clear_color = ClearColorValue::default();
     clear_color.float32 = [0.0f32, 0.0f32, 0.0f32, 1.0f32];
+    clear_color.int32 = [0, 0, 0, 1];
+    clear_color.uint32 = [0, 0, 0, 1];
+
     let mut clear_value = ClearValue::default();
     clear_value.color = clear_color;
     // let clear_values = [clear_value, clear_value];
