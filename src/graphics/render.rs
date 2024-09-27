@@ -3,11 +3,13 @@ use std::{thread::sleep, time::Duration};
 use ash::vk::{
     AccessFlags, AttachmentDescription, AttachmentDescriptionFlags, AttachmentLoadOp,
     AttachmentReference, AttachmentStoreOp, ClearColorValue, ClearDepthStencilValue, ClearValue,
-    CommandBufferBeginInfo, CommandBufferUsageFlags, CullModeFlags, Extent2D, Fence, Format,
-    Framebuffer, FramebufferCreateInfo, FrontFace, GraphicsPipelineCreateInfo, ImageLayout,
-    ImageView, Offset2D, Pipeline, PipelineBindPoint, PipelineCache, PipelineCreateFlags,
-    PipelineInputAssemblyStateCreateFlags, PipelineInputAssemblyStateCreateInfo, PipelineLayout,
-    PipelineLayoutCreateFlags, PipelineLayoutCreateInfo, PipelineMultisampleStateCreateFlags,
+    ColorComponentFlags, CommandBufferBeginInfo, CommandBufferUsageFlags, CullModeFlags, Extent2D,
+    Fence, Format, Framebuffer, FramebufferCreateInfo, FrontFace, GraphicsPipelineCreateInfo,
+    ImageLayout, ImageView, Offset2D, Pipeline, PipelineBindPoint, PipelineCache,
+    PipelineColorBlendAttachmentState, PipelineColorBlendStateCreateFlags,
+    PipelineColorBlendStateCreateInfo, PipelineCreateFlags, PipelineInputAssemblyStateCreateFlags,
+    PipelineInputAssemblyStateCreateInfo, PipelineLayout, PipelineLayoutCreateFlags,
+    PipelineLayoutCreateInfo, PipelineMultisampleStateCreateFlags,
     PipelineMultisampleStateCreateInfo, PipelineRasterizationStateCreateFlags,
     PipelineRasterizationStateCreateInfo, PipelineShaderStageCreateFlags,
     PipelineShaderStageCreateInfo, PipelineStageFlags, PipelineVertexInputStateCreateFlags,
@@ -211,8 +213,9 @@ fn make_render_pass(ctxt: &VkContext, view_fmt: Format) -> RenderPass {
     let subpasses = [subpass_one];
 
     let src_dependency = make_dependency(SUBPASS_EXTERNAL, 0);
-    let dst_dependency = make_dependency(0, SUBPASS_EXTERNAL);
-    let dependencies = [src_dependency, dst_dependency];
+    // let dst_dependency = make_dependency(0, SUBPASS_EXTERNAL);
+    // let dependencies = [src_dependency, dst_dependency];
+    let dependencies = [src_dependency];
 
     match unsafe {
         ctxt.logical_device.create_render_pass(
@@ -237,8 +240,8 @@ fn make_dependency(src_id: u32, dst_id: u32) -> SubpassDependency {
         .dst_subpass(dst_id)
         .src_stage_mask(PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT)
         .dst_stage_mask(PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT)
-        .src_access_mask(AccessFlags::MEMORY_WRITE)
-        .dst_access_mask(AccessFlags::MEMORY_READ)
+        // .src_access_mask(AccessFlags::MEMORY_WRITE)
+        .dst_access_mask(AccessFlags::MEMORY_WRITE)
 }
 
 fn make_subpass_description<'a>(
@@ -294,16 +297,24 @@ fn make_pipeline(
         .offset(Offset2D::default().y(0).x(0));
 
     let viewport_geometry = Viewport::default()
-        .width(1.0f32)
-        .height(1.0f32)
+        .width(1920f32)
+        .height(1080f32)
+        // .width(1.0f32)
+        // .height(1.0f32)
         .x(0.0)
-        .y(0.0);
+        .y(0.0)
+        .min_depth(0.0f32)
+        .max_depth(1.0f32);
 
     let fullscreen_scissors = vec![swapchain_geometry];
     let fullscreen_viewport = vec![viewport_geometry];
 
     let viewport_state = create_viewport_state(&fullscreen_scissors, &fullscreen_viewport);
     let multisample_state = create_multisample_state();
+
+    let attachment_colorblend = create_attachment_colorblend_state();
+    let attachment_colorblends = [attachment_colorblend];
+    let pipeline_colorblend = create_pipeline_colorblend_state(&attachment_colorblends);
 
     let pipeline_create_info = GraphicsPipelineCreateInfo::default()
         .flags(PipelineCreateFlags::empty())
@@ -314,7 +325,7 @@ fn make_pipeline(
         // .dynamic_state(dynamic_state)
         .viewport_state(&viewport_state)
         .multisample_state(&multisample_state)
-        // .color_blend_state(color_blend_state)
+        .color_blend_state(&pipeline_colorblend)
         // .base_pipeline_index(base_pipeline_index)
         // .base_pipeline_handle(base_pipeline_handle)
         .vertex_input_state(&vertex_input_state_info)
@@ -377,12 +388,16 @@ fn create_pipeline_layout(ctxt: &VkContext) -> PipelineLayout {
 fn create_rasterization_state<'a>() -> PipelineRasterizationStateCreateInfo<'a> {
     PipelineRasterizationStateCreateInfo::default()
         .flags(PipelineRasterizationStateCreateFlags::empty())
+        .depth_clamp_enable(false)
         .cull_mode(CullModeFlags::BACK)
         .front_face(FrontFace::CLOCKWISE)
         .polygon_mode(PolygonMode::FILL)
         .depth_bias_enable(false)
+        .depth_bias_constant_factor(0.0f32)
+        .depth_bias_clamp(0.0f32)
+        .depth_bias_slope_factor(0.0f32)
         .rasterizer_discard_enable(false)
-        .line_width(1.0)
+        .line_width(1.0f32)
 }
 
 fn create_viewport_state<'a>(
@@ -419,4 +434,19 @@ fn create_multisample_state<'a>() -> PipelineMultisampleStateCreateInfo<'a> {
         .alpha_to_one_enable(false)
         .alpha_to_coverage_enable(false)
         .min_sample_shading(1.0)
+}
+
+fn create_pipeline_colorblend_state(
+    attachment_blend: &[PipelineColorBlendAttachmentState],
+) -> PipelineColorBlendStateCreateInfo {
+    PipelineColorBlendStateCreateInfo::default()
+        .logic_op_enable(false)
+        .attachments(attachment_blend)
+        .blend_constants([0.0f32, 0.0f32, 0.0f32, 0.0f32])
+}
+
+fn create_attachment_colorblend_state() -> PipelineColorBlendAttachmentState {
+    PipelineColorBlendAttachmentState::default()
+        .color_write_mask(ColorComponentFlags::RGBA)
+        .blend_enable(false)
 }
