@@ -1,6 +1,5 @@
 use ash::vk::{
     ApplicationInfo,
-    // BufferCreateInfo,
     CommandBuffer,
     CommandBufferAllocateInfo,
     CommandBufferLevel,
@@ -14,7 +13,6 @@ use ash::vk::{
     Format,
     Image,
     ImageAspectFlags,
-    // ImageCreateInfo,
     ImageUsageFlags,
     ImageView,
     ImageViewCreateInfo,
@@ -24,6 +22,7 @@ use ash::vk::{
     PhysicalDevice,
     PhysicalDeviceMemoryProperties,
     PhysicalDeviceProperties,
+    PhysicalDeviceSynchronization2Features,
     PhysicalDeviceType,
     PresentModeKHR,
     Queue,
@@ -37,8 +36,7 @@ use ash::vk::{
     SwapchainCreateFlagsKHR,
     SwapchainCreateInfoKHR,
     SwapchainKHR,
-    XcbSurfaceCreateInfoKHR,
-    // QUEUE_FAMILY_EXTERNAL,
+    XcbSurfaceCreateInfoKHR, // QUEUE_FAMILY_EXTERNAL,
 };
 use ash::{Device, Entry, Instance};
 use core::panic;
@@ -166,6 +164,9 @@ pub fn default(xcb_ptr: *mut xcb_connection_t, xcb_window: &Window) -> VkContext
         ash::khr::surface::Instance::new(&entry, &instance);
     let surface: SurfaceKHR = xcb_surface(&xcb_surface_instance, xcb_ptr, xcb_window);
 
+    let surface_present_mode =
+        select_preferred_presentation_mode(&khr_surface_instance, &physical_device, &surface);
+
     let surface_capabilities: SurfaceCapabilitiesKHR = map_physical_device_to_surface_properties(
         &khr_surface_instance,
         &physical_device,
@@ -195,6 +196,7 @@ pub fn default(xcb_ptr: *mut xcb_connection_t, xcb_window: &Window) -> VkContext
         // &device_queue_create_info,
         &graphics_queues,
         &surface_capabilities,
+        surface_present_mode,
     );
 
     let swapchain_images: Vec<Image> = swapchain_images(&swapchain_device, swapchain);
@@ -213,7 +215,13 @@ pub fn default(xcb_ptr: *mut xcb_connection_t, xcb_window: &Window) -> VkContext
     let graphics_pool = build_pools(*graphics_queues.first().unwrap(), &logical_device);
     let transfer_pool = build_pools(*transfer_queues.first().unwrap(), &logical_device);
 
-    crate::graphics::pools::init(graphics_pool, transfer_pool, logical_device.clone());
+    crate::graphics::pools::init(
+        graphics_pool,
+        graphics_queues[0],
+        transfer_pool,
+        transfer_queues[0],
+        logical_device.clone(),
+    );
     crate::graphics::shaders::init(logical_device.clone());
 
     // let buffers = allocate_command_buffer(
@@ -353,15 +361,14 @@ fn init() -> ash::Entry {
 
 #[cfg(all(target_os = "linux", not(target_os = "windows")))]
 fn instance(entry: &ash::Entry) -> ash::Instance {
-    // sleep(Duration::from_secs(10));
+    scan(entry);
 
     debug!("Starting instance creation...");
     let app_name = CString::new("Dust for Linux").unwrap();
-    let khr_surface_name = CString::new("VK_KHR_surface").unwrap();
-    let khr_xcb_surface_name = CString::new("VK_KHR_xcb_surface").unwrap();
     let xcb_ext_name = [
-        khr_surface_name.as_c_str().as_ptr(),
-        khr_xcb_surface_name.as_c_str().as_ptr(),
+        // khr_surface_name.as_c_str().as_ptr(),
+        ash::vk::KHR_SURFACE_NAME.as_ptr(),
+        ash::vk::KHR_XCB_SURFACE_NAME.as_ptr(),
     ];
 
     debug!("Extension names setup...");
@@ -488,6 +495,44 @@ fn shitty_score_physical_device_properties(device_props: &PhysicalDeviceProperti
     score
 }
 
+fn select_preferred_presentation_mode(
+    instance: &ash::khr::surface::Instance,
+    physical_device: &PhysicalDevice,
+    surface: &SurfaceKHR,
+) -> PresentModeKHR {
+    let modes = match unsafe {
+        instance.get_physical_device_surface_present_modes(*physical_device, *surface)
+    } {
+        Ok(modes) => modes,
+        Err(msg) => {
+            panic!("Could not get supported presentation modes: {:?}", msg);
+        }
+    };
+
+    let mut best_mode = PresentModeKHR::SHARED_CONTINUOUS_REFRESH;
+    let mut best_rating = usize::MAX;
+
+    for mode in modes {
+        let new_rating = priority_mode(&mode);
+        if new_rating < best_rating {
+            best_rating = new_rating;
+            best_mode = mode;
+        }
+    }
+
+    best_mode
+}
+
+fn priority_mode(mode: &PresentModeKHR) -> usize {
+    match mode {
+        &PresentModeKHR::MAILBOX => 1,
+        &PresentModeKHR::FIFO => 2,
+        &PresentModeKHR::FIFO_RELAXED => 3,
+        &PresentModeKHR::IMMEDIATE => 4,
+        _ => 10,
+    }
+}
+
 fn map_physical_device_to_surface_properties(
     instance: &ash::khr::surface::Instance,
     device: &PhysicalDevice,
@@ -574,8 +619,11 @@ fn make_logical_device(
 
     // let physical_features = setup_physical_features(instance);
     let physical_features = unsafe { instance.get_physical_device_features(*p_dev) };
+    let mut sync2_create_info =
+        PhysicalDeviceSynchronization2Features::default().synchronization2(true);
 
     let create_info = DeviceCreateInfo::default()
+        .push_next(&mut sync2_create_info)
         .queue_create_infos(queue_selection)
         .enabled_extension_names(&exts_arr)
         .enabled_features(&physical_features);
@@ -818,6 +866,7 @@ fn make_swapchain(
     formatting: &SurfaceFormatKHR,
     queue_families: &[u32],
     surface_capabilities: &SurfaceCapabilitiesKHR,
+    present_mode: PresentModeKHR,
 ) -> SwapchainKHR {
     let swapchain_info = SwapchainCreateInfoKHR::default()
         .flags(SwapchainCreateFlagsKHR::empty())
@@ -832,7 +881,7 @@ fn make_swapchain(
         .queue_family_indices(queue_families)
         .pre_transform(surface_capabilities.current_transform)
         .composite_alpha(CompositeAlphaFlagsKHR::OPAQUE)
-        .present_mode(PresentModeKHR::MAILBOX)
+        .present_mode(present_mode)
         .clipped(true);
 
     match unsafe { device.create_swapchain(&swapchain_info, None) } {

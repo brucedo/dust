@@ -42,9 +42,9 @@ pub fn perform_simple_render(ctxt: &VkContext, bg_image_view: &ImageView, view_f
     let render_complete = util::create_binary_semaphore(ctxt);
 
     let mut clear_color = ClearColorValue::default();
-    clear_color.float32 = [0.0f32, 0.0f32, 0.0f32, 1.0f32];
-    clear_color.int32 = [0, 0, 0, 1];
-    clear_color.uint32 = [0, 0, 0, 1];
+    clear_color.float32 = [1.0f32, 1.0f32, 1.0f32, 1.0f32];
+    clear_color.int32 = [i32::MIN, i32::MIN, i32::MIN, 1];
+    clear_color.uint32 = [u32::MAX, u32::MAX, u32::MAX, 1];
 
     let mut clear_value = ClearValue::default();
     clear_value.color = clear_color;
@@ -125,7 +125,7 @@ pub fn perform_simple_render(ctxt: &VkContext, bg_image_view: &ImageView, view_f
                 );
             }
         };
-        sleep(Duration::from_secs(3));
+        // sleep(Duration::from_secs(3));
     }
 
     debug!("Attempting to present the swapchain image which should be cleared...");
@@ -137,7 +137,7 @@ pub fn perform_simple_render(ctxt: &VkContext, bg_image_view: &ImageView, view_f
         }
     };
 
-    sleep(Duration::from_secs(3));
+    // sleep(Duration::from_secs(3));
 
     unsafe {
         match ctxt

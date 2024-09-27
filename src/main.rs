@@ -2,7 +2,7 @@ use ash::vk::{
     AccessFlags, BufferCreateInfo, BufferImageCopy, BufferUsageFlags, CommandBufferAllocateInfo, CommandBufferBeginInfo, CommandBufferLevel, CommandBufferResetFlags, CommandBufferUsageFlags, DependencyFlags, Extent3D, Fence, FenceCreateFlags, FenceCreateInfo, Format, Image, ImageAspectFlags, ImageCopy, ImageCreateFlags, ImageCreateInfo, ImageLayout, ImageMemoryBarrier, ImageSubresourceLayers, ImageSubresourceRange, ImageTiling, ImageType, ImageUsageFlags, MemoryAllocateInfo, MemoryBarrier, MemoryMapFlags, MemoryPropertyFlags, Offset3D, PipelineStageFlags, PresentInfoKHR, SampleCountFlags, Semaphore, SemaphoreCreateFlags, SemaphoreCreateInfo, SharingMode, SubmitInfo, QUEUE_FAMILY_IGNORED
 };
 use graphics::{image::DustImage, swapchain};
-use graphics::transfer;
+use graphics::{pools, transfer};
 use log::debug;
 
 mod dust_errors;
@@ -46,7 +46,7 @@ fn main() {
     graphics::render::perform_simple_render(&vk_context, &gradient.view, gradient.format);
     // display_image(&vk_context);
     // display_gradient(&vk_context);
-    sleep(Duration::from_secs(10));
+    sleep(Duration::from_secs(3));
 
     debug!("Vulkan instance destroyed...");
 }
@@ -287,6 +287,7 @@ fn load_black(ctxt: &VkContext) -> DustImage {
         ctxt,
         target_image,
         ImageLayout::TRANSFER_SRC_OPTIMAL,
+        pools::get_graphics_queue_family()
     )
 }
 
@@ -358,6 +359,7 @@ fn load_gradient(ctxt: &VkContext) -> DustImage {
         ctxt,
         target_image,
         ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+        pools::get_graphics_queue_family()
     )
 }
 
@@ -689,7 +691,7 @@ fn display_image(vk_ctxt: &VkContext) {
     }
     debug!("Frame_drawn_fence has triggered??");
 
-    sleep(Duration::from_secs(10));
+    sleep(Duration::from_secs(3));
 
     // Destruction section
     unsafe {

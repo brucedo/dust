@@ -1,24 +1,26 @@
 use crate::dust_errors::DustError;
 use ash::vk::{
-    AccessFlags, Buffer, BufferCopy, BufferCreateFlags, BufferCreateInfo, BufferImageCopy,
-    BufferMemoryBarrier, BufferUsageFlags, CommandBuffer, CommandBufferAllocateInfo,
-    CommandBufferBeginInfo, CommandBufferLevel, CommandBufferUsageFlags, DependencyFlags,
-    DeviceMemory, FenceCreateFlags, FenceCreateInfo, Image, ImageAspectFlags, ImageCreateInfo,
-    ImageLayout, ImageMemoryBarrier, ImageSubresourceRange, MemoryAllocateInfo, MemoryMapFlags,
-    MemoryPropertyFlags, PhysicalDeviceMemoryProperties, PipelineStageFlags, SharingMode,
+    AccessFlags, AccessFlags2, Buffer, BufferCopy, BufferCreateFlags, BufferCreateInfo,
+    BufferImageCopy, BufferMemoryBarrier, BufferUsageFlags, CommandBuffer,
+    CommandBufferAllocateInfo, CommandBufferBeginInfo, CommandBufferLevel, CommandBufferUsageFlags,
+    DependencyFlags, DependencyInfo, DeviceMemory, FenceCreateFlags, FenceCreateInfo, Image,
+    ImageAspectFlags, ImageCreateInfo, ImageLayout, ImageMemoryBarrier, ImageMemoryBarrier2,
+    ImageSubresourceRange, MemoryAllocateInfo, MemoryMapFlags, MemoryPropertyFlags,
+    PhysicalDeviceMemoryProperties, PipelineStageFlags, PipelineStageFlags2, SharingMode,
     SubmitInfo, QUEUE_FAMILY_IGNORED,
 };
 use log::debug;
 
 use crate::setup::instance::VkContext;
 
-use super::image::DustImage;
+use super::{image::DustImage, pools};
 
 pub fn copy_to_image<T>(
     data: &[T],
     ctxt: &VkContext,
     image_props: &ImageCreateInfo,
     target_layout: ImageLayout,
+    target_queue_family: u32,
 ) -> DustImage
 where
     T: Sized + Clone + Copy,
@@ -60,29 +62,45 @@ where
         .base_array_layer(0)
         .aspect_mask(ImageAspectFlags::COLOR);
 
-    let transfer_image_barrier = ImageMemoryBarrier::default()
+    let pre_copy_barrier = ImageMemoryBarrier2::default()
         .src_queue_family_index(QUEUE_FAMILY_IGNORED)
+        // .dst_queue_family_index(pools::get_transfer_queue_family())
         .dst_queue_family_index(QUEUE_FAMILY_IGNORED)
         .old_layout(ImageLayout::UNDEFINED)
         .new_layout(ImageLayout::TRANSFER_DST_OPTIMAL)
-        .src_access_mask(AccessFlags::NONE)
-        .dst_access_mask(AccessFlags::TRANSFER_READ | AccessFlags::TRANSFER_WRITE)
+        .src_access_mask(AccessFlags2::NONE)
+        .src_stage_mask(PipelineStageFlags2::TOP_OF_PIPE)
+        .dst_access_mask(AccessFlags2::TRANSFER_WRITE)
+        .dst_stage_mask(PipelineStageFlags2::TRANSFER)
         .image(image_target)
         .subresource_range(transfer_subresource_range);
-    let transfer_barriers = vec![transfer_image_barrier];
+
+    // let pre_copy_barrier = ImageMemoryBarrier::default()
+    //     .src_queue_family_index(QUEUE_FAMILY_IGNORED)
+    //     .dst_queue_family_index(QUEUE_FAMILY_IGNORED)
+    //     .old_layout(ImageLayout::UNDEFINED)
+    //     .new_layout(ImageLayout::TRANSFER_DST_OPTIMAL)
+    //     .src_access_mask(AccessFlags::NONE)
+    //     .dst_access_mask(AccessFlags::TRANSFER_WRITE)
+    //     .image(image_target)
+    //     .subresource_range(transfer_subresource_range);
+    let transfer_barriers = vec![pre_copy_barrier];
 
     // 2. Copy image via buffer_iamge_copy
     // 3. Transition image from transfer-optimal BACK to initial state.
-    let transfer_back_image_barrier = ImageMemoryBarrier::default()
-        .src_queue_family_index(QUEUE_FAMILY_IGNORED)
-        .dst_queue_family_index(QUEUE_FAMILY_IGNORED)
+    let dst_mask = map_access_flags(target_layout);
+    let post_copy_barrier = ImageMemoryBarrier2::default()
+        .src_queue_family_index(pools::get_transfer_queue_family())
+        .dst_queue_family_index(target_queue_family)
         .old_layout(ImageLayout::TRANSFER_DST_OPTIMAL)
         .new_layout(target_layout)
-        .src_access_mask(AccessFlags::TRANSFER_WRITE)
-        .dst_access_mask(AccessFlags::TRANSFER_READ)
+        .src_access_mask(AccessFlags2::TRANSFER_WRITE)
+        .src_stage_mask(PipelineStageFlags2::TRANSFER)
+        .dst_access_mask(dst_mask)
+        .dst_stage_mask(PipelineStageFlags2::ALL_COMMANDS)
         .image(image_target)
         .subresource_range(transfer_subresource_range);
-    let transfer_back_barriers = vec![transfer_back_image_barrier];
+    let transfer_back_barriers = vec![post_copy_barrier];
 
     // let cmd_buffer = match unsafe {
     //     ctxt.logical_device.allocate_command_buffers(
@@ -99,6 +117,18 @@ where
     // };
     let cmd_buffer = crate::graphics::pools::reserve_transfer_buffer(ctxt);
 
+    let copy_into_dependency_info = DependencyInfo::default()
+        .memory_barriers(&[])
+        .image_memory_barriers(&transfer_barriers)
+        .buffer_memory_barriers(&[])
+        .dependency_flags(DependencyFlags::empty());
+
+    let transfer_to_final_dependency_info = DependencyInfo::default()
+        .memory_barriers(&[])
+        .image_memory_barriers(&transfer_back_barriers)
+        .buffer_memory_barriers(&[])
+        .dependency_flags(DependencyFlags::empty());
+
     unsafe {
         match ctxt.logical_device.begin_command_buffer(
             cmd_buffer,
@@ -109,14 +139,16 @@ where
                 panic!("Unable to begin command buffer: {:?}", msg);
             }
         };
-        ctxt.logical_device.cmd_pipeline_barrier(
+
+        ctxt.logical_device.cmd_pipeline_barrier2(
             cmd_buffer,
-            PipelineStageFlags::TOP_OF_PIPE,
-            PipelineStageFlags::TRANSFER,
-            DependencyFlags::empty(),
-            &[],
-            &[],
-            &transfer_barriers,
+            &copy_into_dependency_info,
+            // PipelineStageFlags::TOP_OF_PIPE,
+            // PipelineStageFlags::TRANSFER,
+            // DependencyFlags::empty(),
+            // &[],
+            // &[],
+            // &transfer_barriers,
         );
         ctxt.logical_device.cmd_copy_buffer_to_image(
             cmd_buffer,
@@ -125,14 +157,15 @@ where
             ImageLayout::TRANSFER_DST_OPTIMAL,
             &regions,
         );
-        ctxt.logical_device.cmd_pipeline_barrier(
+        ctxt.logical_device.cmd_pipeline_barrier2(
             cmd_buffer,
-            PipelineStageFlags::TRANSFER,
-            PipelineStageFlags::TRANSFER,
-            DependencyFlags::empty(),
-            &[],
-            &[],
-            &transfer_back_barriers,
+            &transfer_to_final_dependency_info,
+            // PipelineStageFlags::TRANSFER,
+            // PipelineStageFlags::TRANSFER,
+            // DependencyFlags::empty(),
+            // &[],
+            // &[],
+            // &transfer_back_barriers,
         );
         match ctxt.logical_device.end_command_buffer(cmd_buffer) {
             Ok(_) => {}
@@ -474,4 +507,18 @@ pub fn match_memory_type(
         }
     }
     Err(DustError::NoMatchingMemoryType)
+}
+
+fn map_access_flags(layout: ImageLayout) -> AccessFlags2 {
+    match layout {
+        ImageLayout::SHADER_READ_ONLY_OPTIMAL => {
+            AccessFlags2::INPUT_ATTACHMENT_READ
+                | AccessFlags2::SHADER_READ
+                | AccessFlags2::COLOR_ATTACHMENT_READ
+                | AccessFlags2::SHADER_SAMPLED_READ
+                | AccessFlags2::SHADER_STORAGE_READ
+            // | AccessFlags2::SHADER_BINDING_TABLE_READ_KHR
+        }
+        _ => AccessFlags2::empty(),
+    }
 }

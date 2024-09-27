@@ -15,9 +15,17 @@ use super::image::new;
 // type CommandBufferAllocator = fn(&CommandBufferAllocateInfo) -> VkResult<CommandBuffer>;
 
 static GRAPHICS_POOL: OnceLock<CommandPool> = OnceLock::new();
+static GRAPHICS_QUEUE_FAMILY: OnceLock<u32> = OnceLock::new();
 static TRANSFER_POOL: OnceLock<CommandPool> = OnceLock::new();
+static TRANSFER_QUEUE_FAMILY: OnceLock<u32> = OnceLock::new();
 
-pub fn init(graphics_pool: CommandPool, transfer_pool: CommandPool, logical_device: Arc<Device>) {
+pub fn init(
+    graphics_pool: CommandPool,
+    graphics_queue_family: u32,
+    transfer_pool: CommandPool,
+    transfer_queue_family: u32,
+    logical_device: Arc<Device>,
+) {
     match GRAPHICS_POOL.set(graphics_pool) {
         Ok(_) => {}
         Err(_) => {
@@ -31,6 +39,20 @@ pub fn init(graphics_pool: CommandPool, transfer_pool: CommandPool, logical_devi
             panic!("Unable to set the transfer pool static.");
         }
     };
+
+    match GRAPHICS_QUEUE_FAMILY.set(graphics_queue_family) {
+        Ok(_) => {}
+        Err(_) => {
+            panic!("Unable to set the graphics queue family number.");
+        }
+    }
+
+    match TRANSFER_QUEUE_FAMILY.set(transfer_queue_family) {
+        Ok(_) => {}
+        Err(_) => {
+            panic!("Unable to set the transfer queue family number.");
+        }
+    }
 }
 
 pub fn destroy(ctxt: &VkContext) {
@@ -74,4 +96,29 @@ pub fn reserve_transfer_buffer(ctxt: &VkContext) -> CommandBuffer {
             panic!("Vulkan error while allocating transfer buffer: {:?}", msg);
         }
     }
+}
+
+pub fn get_transfer_queue_family() -> u32 {
+    match TRANSFER_QUEUE_FAMILY.get() {
+        Some(family) => *family,
+        None => {
+            panic!("Transfer family was never allocated.");
+        }
+    }
+}
+
+pub fn unsafe_get_transfer_queue_family() -> u32 {
+    *TRANSFER_QUEUE_FAMILY.get().unwrap()
+}
+
+pub fn get_graphics_queue_family() -> u32 {
+    match GRAPHICS_QUEUE_FAMILY.get() {
+        Some(family) => *family,
+        None => {
+            panic!("Transfer family was never allocated.");
+        }
+    }
+}
+pub fn unsafe_get_graphics_queue_family() -> u32 {
+    *GRAPHICS_QUEUE_FAMILY.get().unwrap()
 }
