@@ -42,8 +42,8 @@ fn main() {
     show_physical_memory_stats(&vk_context);
 
 
-    let gradient = load_gradient(&vk_context);
-    graphics::render::perform_simple_render(&vk_context, &gradient.view, gradient.format);
+    let (gradient, semaphore) = load_gradient(&vk_context);
+    graphics::render::composite_test(&vk_context, &gradient.view, gradient.format, semaphore);
     // display_image(&vk_context);
     // display_gradient(&vk_context);
     sleep(Duration::from_secs(3));
@@ -251,7 +251,7 @@ fn display_gradient(ctxt: &VkContext) {
     }
 }
 
-fn load_black(ctxt: &VkContext) -> DustImage {
+fn load_black(ctxt: &VkContext) -> (DustImage, Semaphore) {
     let image_width = ctxt.surface_capabilities.current_extent.width;
     let image_height = ctxt.surface_capabilities.current_extent.height;
 
@@ -291,7 +291,7 @@ fn load_black(ctxt: &VkContext) -> DustImage {
     )
 }
 
-fn load_gradient(ctxt: &VkContext) -> DustImage {
+fn load_gradient(ctxt: &VkContext) -> (DustImage, Semaphore) {
     let image_width = ctxt.surface_capabilities.current_extent.width;
     let image_height = ctxt.surface_capabilities.current_extent.height;
 

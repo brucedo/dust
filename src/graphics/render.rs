@@ -15,7 +15,7 @@ use ash::vk::{
     PipelineShaderStageCreateInfo, PipelineStageFlags, PipelineVertexInputStateCreateFlags,
     PipelineVertexInputStateCreateInfo, PipelineViewportStateCreateFlags,
     PipelineViewportStateCreateInfo, PolygonMode, PrimitiveTopology, Rect2D, RenderPass,
-    RenderPassBeginInfo, RenderPassCreateFlags, RenderPassCreateInfo, SampleCountFlags,
+    RenderPassBeginInfo, RenderPassCreateFlags, RenderPassCreateInfo, SampleCountFlags, Semaphore,
     ShaderStageFlags, SubmitInfo, SubpassContents, SubpassDependency, SubpassDescription,
     SubpassDescriptionFlags, Viewport, SUBPASS_EXTERNAL,
 };
@@ -26,7 +26,12 @@ use crate::{graphics::shaders, setup::instance::VkContext};
 
 use super::{swapchain, util};
 
-pub fn perform_simple_render(ctxt: &VkContext, bg_image_view: &ImageView, view_fmt: Format) {
+pub fn composite_test(
+    ctxt: &VkContext,
+    bg_image_view: &ImageView,
+    view_fmt: Format,
+    image_ready: Semaphore,
+) {
     // let block_till_acquired = util::create_fence(ctxt);
     let signal_acquired = util::create_binary_semaphore(ctxt);
 
@@ -59,7 +64,7 @@ pub fn perform_simple_render(ctxt: &VkContext, bg_image_view: &ImageView, view_f
     let begin_info =
         CommandBufferBeginInfo::default().flags(CommandBufferUsageFlags::ONE_TIME_SUBMIT);
 
-    let wait_for_arr = [signal_acquired];
+    let wait_for_arr = [signal_acquired, image_ready];
     let signal_on_complete_arr = [render_complete];
     let command_buffers = [buffer];
     let submit_info = SubmitInfo::default()
@@ -159,6 +164,7 @@ pub fn perform_simple_render(ctxt: &VkContext, bg_image_view: &ImageView, view_f
             .destroy_fence(block_till_queue_complete, None);
         ctxt.logical_device.destroy_semaphore(signal_acquired, None);
         ctxt.logical_device.destroy_semaphore(render_complete, None);
+        ctxt.logical_device.destroy_semaphore(image_ready, None);
         ctxt.logical_device.destroy_framebuffer(framebuffer, None);
         ctxt.logical_device.destroy_render_pass(render_pass, None);
         ctxt.logical_device
@@ -248,12 +254,29 @@ fn make_subpass_description<'a>(
     input_attachments: &'a [AttachmentReference],
     color_attachments: &'a [AttachmentReference],
 ) -> SubpassDescription<'a> {
+    debug!("=== Subpass Description");
+    debug!("    Input Attachment count: {}", input_attachments.len());
+    for attachment in input_attachments {
+        debug!(
+            "    Input Attachment: {} - {:?}",
+            attachment.attachment, attachment.layout
+        );
+    }
+
+    debug!("    Color Attachment count: {}", color_attachments.len());
+    for attachment in color_attachments {
+        debug!(
+            "    Input Attachment: {} - {:?}",
+            attachment.attachment, attachment.layout
+        );
+    }
+
     SubpassDescription::default()
         .flags(SubpassDescriptionFlags::empty())
         .input_attachments(input_attachments)
+        // .resolve_attachments(&[])
         .color_attachments(color_attachments)
         .pipeline_bind_point(PipelineBindPoint::GRAPHICS)
-        .resolve_attachments(&[])
         .preserve_attachments(&[])
 }
 

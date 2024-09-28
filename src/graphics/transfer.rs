@@ -6,14 +6,14 @@ use ash::vk::{
     DependencyFlags, DependencyInfo, DeviceMemory, FenceCreateFlags, FenceCreateInfo, Image,
     ImageAspectFlags, ImageCreateInfo, ImageLayout, ImageMemoryBarrier, ImageMemoryBarrier2,
     ImageSubresourceRange, MemoryAllocateInfo, MemoryMapFlags, MemoryPropertyFlags,
-    PhysicalDeviceMemoryProperties, PipelineStageFlags, PipelineStageFlags2, SharingMode,
-    SubmitInfo, QUEUE_FAMILY_IGNORED,
+    PhysicalDeviceMemoryProperties, PipelineStageFlags, PipelineStageFlags2, Semaphore,
+    SemaphoreCreateFlags, SemaphoreCreateInfo, SharingMode, SubmitInfo, QUEUE_FAMILY_IGNORED,
 };
 use log::debug;
 
 use crate::setup::instance::VkContext;
 
-use super::{image::DustImage, pools};
+use super::{image::DustImage, pools, util};
 
 pub fn copy_to_image<T>(
     data: &[T],
@@ -21,7 +21,7 @@ pub fn copy_to_image<T>(
     image_props: &ImageCreateInfo,
     target_layout: ImageLayout,
     target_queue_family: u32,
-) -> DustImage
+) -> (DustImage, Semaphore)
 where
     T: Sized + Clone + Copy,
 {
@@ -62,59 +62,37 @@ where
         .base_array_layer(0)
         .aspect_mask(ImageAspectFlags::COLOR);
 
-    let pre_copy_barrier = ImageMemoryBarrier2::default()
+    let to_transfer_dst_layout = ImageMemoryBarrier2::default()
+        // .src_stage_mask(PipelineStageFlags2::TOP_OF_PIPE)
+        // .src_access_mask(AccessFlags2::NONE)
         .src_queue_family_index(QUEUE_FAMILY_IGNORED)
         // .dst_queue_family_index(pools::get_transfer_queue_family())
+        .dst_stage_mask(PipelineStageFlags2::TRANSFER)
+        .dst_access_mask(AccessFlags2::TRANSFER_WRITE)
         .dst_queue_family_index(QUEUE_FAMILY_IGNORED)
         .old_layout(ImageLayout::UNDEFINED)
         .new_layout(ImageLayout::TRANSFER_DST_OPTIMAL)
-        .src_access_mask(AccessFlags2::NONE)
-        .src_stage_mask(PipelineStageFlags2::TOP_OF_PIPE)
-        .dst_access_mask(AccessFlags2::TRANSFER_WRITE)
-        .dst_stage_mask(PipelineStageFlags2::TRANSFER)
         .image(image_target)
         .subresource_range(transfer_subresource_range);
 
-    // let pre_copy_barrier = ImageMemoryBarrier::default()
-    //     .src_queue_family_index(QUEUE_FAMILY_IGNORED)
-    //     .dst_queue_family_index(QUEUE_FAMILY_IGNORED)
-    //     .old_layout(ImageLayout::UNDEFINED)
-    //     .new_layout(ImageLayout::TRANSFER_DST_OPTIMAL)
-    //     .src_access_mask(AccessFlags::NONE)
-    //     .dst_access_mask(AccessFlags::TRANSFER_WRITE)
-    //     .image(image_target)
-    //     .subresource_range(transfer_subresource_range);
-    let transfer_barriers = vec![pre_copy_barrier];
+    let transfer_barriers = vec![to_transfer_dst_layout];
 
     // 2. Copy image via buffer_iamge_copy
     // 3. Transition image from transfer-optimal BACK to initial state.
     let dst_mask = map_access_flags(target_layout);
-    let post_copy_barrier = ImageMemoryBarrier2::default()
+    let from_transfer_dst_layout = ImageMemoryBarrier2::default()
+        .src_stage_mask(PipelineStageFlags2::TRANSFER)
+        .src_access_mask(AccessFlags2::TRANSFER_WRITE)
         .src_queue_family_index(pools::get_transfer_queue_family())
+        // .dst_stage_mask(PipelineStageFlags2::FRAGMENT_SHADER)
+        // .dst_access_mask(dst_mask)
         .dst_queue_family_index(target_queue_family)
         .old_layout(ImageLayout::TRANSFER_DST_OPTIMAL)
         .new_layout(target_layout)
-        .src_access_mask(AccessFlags2::TRANSFER_WRITE)
-        .src_stage_mask(PipelineStageFlags2::TRANSFER)
-        .dst_access_mask(dst_mask)
-        .dst_stage_mask(PipelineStageFlags2::ALL_COMMANDS)
         .image(image_target)
         .subresource_range(transfer_subresource_range);
-    let transfer_back_barriers = vec![post_copy_barrier];
+    let transfer_back_barriers = vec![from_transfer_dst_layout];
 
-    // let cmd_buffer = match unsafe {
-    //     ctxt.logical_device.allocate_command_buffers(
-    //         &CommandBufferAllocateInfo::default()
-    //             .command_pool(*ctxt.transfer_queue_command_pools.first().unwrap())
-    //             .command_buffer_count(1)
-    //             .level(CommandBufferLevel::PRIMARY),
-    //     )
-    // } {
-    //     Ok(mut buffers) => buffers.pop().unwrap(),
-    //     Err(msg) => {
-    //         panic!("Unable to allocate command buffers: {:?}", msg);
-    //     }
-    // };
     let cmd_buffer = crate::graphics::pools::reserve_transfer_buffer(ctxt);
 
     let copy_into_dependency_info = DependencyInfo::default()
@@ -128,6 +106,8 @@ where
         .image_memory_barriers(&transfer_back_barriers)
         .buffer_memory_barriers(&[])
         .dependency_flags(DependencyFlags::empty());
+
+    let copy_and_transition_complete_semaphore = util::create_binary_semaphore(ctxt);
 
     unsafe {
         match ctxt.logical_device.begin_command_buffer(
@@ -176,19 +156,23 @@ where
     }
 
     let buffers = [cmd_buffer];
-    run_commands_blocking(ctxt, &buffers);
+    let signal_semaphores = [copy_and_transition_complete_semaphore];
+    run_commands_blocking(ctxt, &buffers, &signal_semaphores);
 
     // cleanup
     unsafe {
-        ctxt.logical_device.free_memory(memory_handle, None);
         ctxt.logical_device.destroy_buffer(transfer_buffer, None);
+        ctxt.logical_device.free_memory(memory_handle, None);
     }
 
-    crate::graphics::image::new(
-        image_target,
-        image_props.format,
-        device_memory,
-        ctxt.logical_device.clone(),
+    (
+        crate::graphics::image::new(
+            image_target,
+            image_props.format,
+            device_memory,
+            ctxt.logical_device.clone(),
+        ),
+        copy_and_transition_complete_semaphore,
     )
 }
 
@@ -290,7 +274,7 @@ where
 
     // let commands_to_run = &cmd_buffer[0..1];
 
-    run_commands_blocking(ctxt, &[cmd_buffer]);
+    run_commands_blocking(ctxt, &[cmd_buffer], &[]);
 
     unsafe {
         ctxt.logical_device.destroy_buffer(transfer_buffer, None);
@@ -300,10 +284,15 @@ where
     perm_buffer
 }
 
-fn run_commands_blocking(ctxt: &VkContext, buffers: &[CommandBuffer]) {
+fn run_commands_blocking(
+    ctxt: &VkContext,
+    buffers: &[CommandBuffer],
+    signal_complete_semaphore: &[Semaphore],
+) {
     let submit_info = SubmitInfo::default()
         .command_buffers(buffers)
         .wait_semaphores(&[])
+        .signal_semaphores(signal_complete_semaphore)
         .wait_dst_stage_mask(&[]);
     let submits = vec![submit_info];
 
