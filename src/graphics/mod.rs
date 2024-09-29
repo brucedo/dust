@@ -1,3 +1,4 @@
+pub mod bitmap;
 pub mod image;
 pub mod pools;
 pub mod render;

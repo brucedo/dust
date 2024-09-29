@@ -3,7 +3,7 @@ use ash::vk::{
     ImageUsageFlags, SampleCountFlags, Semaphore, SharingMode,
 };
 use graphics::image::DustImage;
-use graphics::{pools, transfer};
+use graphics::{bitmap, pools, transfer};
 use log::debug;
 
 mod dust_errors;
@@ -12,6 +12,8 @@ mod input;
 mod setup;
 
 use setup::{instance::VkContext, xcb_window};
+use std::fs::File;
+use std::io::Read;
 use std::{
     thread::{self, sleep},
     time::Duration,
@@ -40,15 +42,27 @@ fn main() {
     thread::spawn(move || xcb_window::event_loop(conn, sender));
 
     let vk_context = instance::default(_xcb_ptr, &window);
-    show_physical_memory_stats(&vk_context);
+    // show_physical_memory_stats(&vk_context);
 
-    let (gradient, semaphore) = load_gradient(&vk_context);
-    graphics::render::composite_test(&vk_context, &gradient.view, gradient.format, semaphore);
+    let sample_bmp_data = load_sample_bmp();
+    bitmap::new(&sample_bmp_data);
+
+    // let (gradient, semaphore) = load_gradient(&vk_context);
+    // graphics::render::composite_test(&vk_context, &gradient.view, gradient.format, semaphore);
     // display_image(&vk_context);
     // display_gradient(&vk_context);
     sleep(Duration::from_secs(3));
 
     debug!("Vulkan instance destroyed...");
+}
+
+fn load_sample_bmp() -> Vec<u8> {
+    let mut buffer = Vec::<u8>::new();
+    if let Ok(mut hud_file) = File::open("resources/Doom_status_bar.bmp") {
+        hud_file.read_to_end(&mut buffer);
+    }
+
+    buffer
 }
 
 fn show_physical_memory_stats(vk_ctxt: &VkContext) {
