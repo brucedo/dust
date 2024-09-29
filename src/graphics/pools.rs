@@ -1,16 +1,10 @@
 use std::sync::Arc;
 use std::sync::OnceLock;
 
-use ash::prelude::VkResult;
-use ash::vk::{
-    AllocationCallbacks, Buffer, BufferCreateFlags, BufferCreateInfo, BufferUsageFlags,
-    CommandBuffer, CommandBufferAllocateInfo, CommandBufferLevel, CommandPool, SharingMode,
-};
+use ash::vk::{CommandBuffer, CommandBufferAllocateInfo, CommandBufferLevel, CommandPool};
 use ash::Device;
 
 use crate::setup::instance::VkContext;
-
-use super::image::new;
 
 // type CommandBufferAllocator = fn(&CommandBufferAllocateInfo) -> VkResult<CommandBuffer>;
 

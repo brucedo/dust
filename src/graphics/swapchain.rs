@@ -50,7 +50,7 @@ pub fn init(
 
     match SWAPCHAIN_SURFACE_FORMAT.set(swapchain_format) {
         Ok(_) => {}
-        Err(msg) => {
+        Err(_) => {
             panic!("Failed to set the SWAPCHAIN_SURFACE_FORMAT static in the swapchain module");
         }
     };

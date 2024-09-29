@@ -1,15 +1,12 @@
-use std::{thread::sleep, time::Duration};
-
 use ash::vk::{
     AccessFlags, AttachmentDescription, AttachmentDescriptionFlags, AttachmentLoadOp,
-    AttachmentReference, AttachmentStoreOp, ClearColorValue, ClearDepthStencilValue, ClearValue,
-    ColorComponentFlags, CommandBufferBeginInfo, CommandBufferUsageFlags, CullModeFlags, Extent2D,
-    Fence, Format, Framebuffer, FramebufferCreateInfo, FrontFace, GraphicsPipelineCreateInfo,
-    ImageLayout, ImageView, Offset2D, Pipeline, PipelineBindPoint, PipelineCache,
-    PipelineColorBlendAttachmentState, PipelineColorBlendStateCreateFlags,
-    PipelineColorBlendStateCreateInfo, PipelineCreateFlags, PipelineInputAssemblyStateCreateFlags,
-    PipelineInputAssemblyStateCreateInfo, PipelineLayout, PipelineLayoutCreateFlags,
-    PipelineLayoutCreateInfo, PipelineMultisampleStateCreateFlags,
+    AttachmentReference, AttachmentStoreOp, ClearColorValue, ClearValue, ColorComponentFlags,
+    CommandBufferBeginInfo, CommandBufferUsageFlags, CullModeFlags, Extent2D, Fence, Format,
+    Framebuffer, FramebufferCreateInfo, FrontFace, GraphicsPipelineCreateInfo, ImageLayout,
+    ImageView, Offset2D, Pipeline, PipelineBindPoint, PipelineCache,
+    PipelineColorBlendAttachmentState, PipelineColorBlendStateCreateInfo, PipelineCreateFlags,
+    PipelineInputAssemblyStateCreateFlags, PipelineInputAssemblyStateCreateInfo, PipelineLayout,
+    PipelineLayoutCreateFlags, PipelineLayoutCreateInfo, PipelineMultisampleStateCreateFlags,
     PipelineMultisampleStateCreateInfo, PipelineRasterizationStateCreateFlags,
     PipelineRasterizationStateCreateInfo, PipelineShaderStageCreateFlags,
     PipelineShaderStageCreateInfo, PipelineStageFlags, PipelineVertexInputStateCreateFlags,
@@ -373,8 +370,8 @@ fn make_pipeline(
 
 fn fill_pipeline_shader_stage_infos<'a>() -> Vec<PipelineShaderStageCreateInfo<'a>> {
     // Yes I know.  unwrap bad.  This is speedrun territory.
-    let fragment_shader = shaders::shader_by_name("compositor.frag").unwrap();
-    let vertex_shader = shaders::shader_by_name("passthrough.vertex").unwrap();
+    let fragment_shader = shaders::shader_by_name("compositor").unwrap();
+    let vertex_shader = shaders::shader_by_name("passthrough").unwrap();
 
     let vertex_shader_stage_info = PipelineShaderStageCreateInfo::default()
         .name(vertex_shader.name.as_c_str())

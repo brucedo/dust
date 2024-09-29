@@ -1,13 +1,12 @@
 use crate::dust_errors::DustError;
 use ash::vk::{
     AccessFlags, AccessFlags2, Buffer, BufferCopy, BufferCreateFlags, BufferCreateInfo,
-    BufferImageCopy, BufferMemoryBarrier, BufferUsageFlags, CommandBuffer,
-    CommandBufferAllocateInfo, CommandBufferBeginInfo, CommandBufferLevel, CommandBufferUsageFlags,
-    DependencyFlags, DependencyInfo, DeviceMemory, FenceCreateFlags, FenceCreateInfo, Image,
-    ImageAspectFlags, ImageCreateInfo, ImageLayout, ImageMemoryBarrier, ImageMemoryBarrier2,
+    BufferImageCopy, BufferMemoryBarrier, BufferUsageFlags, CommandBuffer, CommandBufferBeginInfo,
+    CommandBufferUsageFlags, DependencyFlags, DependencyInfo, DeviceMemory, FenceCreateFlags,
+    FenceCreateInfo, Image, ImageAspectFlags, ImageCreateInfo, ImageLayout, ImageMemoryBarrier2,
     ImageSubresourceRange, MemoryAllocateInfo, MemoryMapFlags, MemoryPropertyFlags,
     PhysicalDeviceMemoryProperties, PipelineStageFlags, PipelineStageFlags2, Semaphore,
-    SemaphoreCreateFlags, SemaphoreCreateInfo, SharingMode, SubmitInfo, QUEUE_FAMILY_IGNORED,
+    SharingMode, SubmitInfo, QUEUE_FAMILY_IGNORED,
 };
 use log::debug;
 
@@ -79,7 +78,6 @@ where
 
     // 2. Copy image via buffer_iamge_copy
     // 3. Transition image from transfer-optimal BACK to initial state.
-    let dst_mask = map_access_flags(target_layout);
     let from_transfer_dst_layout = ImageMemoryBarrier2::default()
         .src_stage_mask(PipelineStageFlags2::TRANSFER)
         .src_access_mask(AccessFlags2::TRANSFER_WRITE)
@@ -193,21 +191,6 @@ where
         .src_offset(0)
         .dst_offset(0)];
 
-    // let cmd_buffer_alloc_info = CommandBufferAllocateInfo::default()
-    //     .level(CommandBufferLevel::PRIMARY)
-    //     .command_pool(*ctxt.transfer_queue_command_pools.first().unwrap())
-    //     .command_buffer_count(1);
-    //
-    // let cmd_buffer = match unsafe {
-    //     ctxt.logical_device
-    //         .allocate_command_buffers(&cmd_buffer_alloc_info)
-    // } {
-    //     Ok(buffer) => buffer,
-    //     Err(msg) => {
-    //         panic!("Failed to allocate buffer from transfer pool: {:?}", msg);
-    //     }
-    // };
-    //
     let cmd_buffer = crate::graphics::pools::reserve_transfer_buffer(ctxt);
 
     let begin_info =
@@ -220,17 +203,6 @@ where
         .size(size_in_bytes)
         .buffer(perm_buffer)
         .offset(0);
-    let fence = match unsafe {
-        ctxt.logical_device.create_fence(
-            &FenceCreateInfo::default().flags(FenceCreateFlags::empty()),
-            None,
-        )
-    } {
-        Ok(fence) => fence,
-        Err(msg) => {
-            panic!("Fence creation failed: {:?}", msg);
-        }
-    };
 
     unsafe {
         match ctxt
@@ -320,7 +292,10 @@ fn run_commands_blocking(
     };
 
     unsafe {
-        match ctxt.logical_device.wait_for_fences(&[fence], true, 1000000) {
+        match ctxt
+            .logical_device
+            .wait_for_fences(&[fence], true, 10000000000)
+        {
             Ok(_) => {}
             Err(msg) => {
                 panic!("Waiting for fence at end of transfer errored: {:?}", msg);

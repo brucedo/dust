@@ -1,3 +1,18 @@
+VERTEX_TARGET="target/debug/shaders/vertex"
+FRAGMENT_TARGET="target/debug/shaders/fragment"
+
+if [[ ! -d $VERTEX_TARGET ]]; then 
+    mkdir -p $VERTEX_TARGET
+fi
+
+if [[ ! -d $FRAGMENT_TARGET ]]; then 
+    mkdir -p $FRAGMENT_TARGET
+fi
+
+
+glslc -o $VERTEX_TARGET/passthrough.spv --target-env=vulkan1.3 src/graphics/shaders/vertex/passthrough.vert
+glslc -o $FRAGMENT_TARGET/compositor.spv --target-env=vulkan1.3 src/graphics/shaders/fragment/compositor.frag
+
 export VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation;VK_LAYER_LUNARG_api_dump
 export VK_LOADER_LAYERS_ENABLE=*validation
 export RUST_LOG=debug

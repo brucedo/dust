@@ -1,12 +1,4 @@
-use std::{
-    borrow::BorrowMut,
-    collections::HashMap,
-    ffi::CString,
-    fs::read_dir,
-    io::Read,
-    path::Path,
-    sync::{LazyLock, OnceLock, RwLock},
-};
+use std::{collections::HashMap, ffi::CString, fs::read_dir, io::Read, path::Path, sync::OnceLock};
 #[cfg(all(target_os = "linux", not(target_os = "windows")))]
 use std::{
     fs::File,
@@ -43,16 +35,18 @@ pub fn init(device: Arc<Device>) {
     let shaders = load_shaders();
 
     unsafe {
-        SHADERS.set(shaders);
+        match SHADERS.set(shaders) {
+            Ok(_) => {}
+            Err(_) => {
+                panic!("The Shader map could not be set in the shader module.");
+            }
+        }
     }
 }
 
-pub fn destroy(ctxt: &VkContext) {
-    match unsafe { SHADERS.take() } {
-        Some(shaders) => {
-            destroy_shaders(shaders);
-        }
-        None => {}
+pub fn destroy(_ctxt: &VkContext) {
+    if let Some(shaders) = unsafe { SHADERS.take() } {
+        destroy_shaders(shaders);
     }
 }
 
@@ -153,7 +147,7 @@ fn load_shaders() -> HashMap<String, ShaderWrapper> {
 
 fn destroy_shaders(mut shader_map: HashMap<String, ShaderWrapper>) {
     match LOGICAL_DEVICE.get() {
-        Some(device) => shader_map.drain().for_each(|(name, shader_type)| unsafe {
+        Some(device) => shader_map.drain().for_each(|(_name, shader_type)| unsafe {
             device.destroy_shader_module(shader_type.shader_module, None)
         }),
 
@@ -250,11 +244,10 @@ fn process_shader_file(path: &Path, storage: &mut HashMap<String, ShaderWrapper>
             }
         };
 
-        let shader_name = path.file_stem().and_then(|file_name_os_str| {
-            file_name_os_str
-                .to_str()
-                .and_then(|file_name_str| Some(String::from(file_name_str)))
-        });
+        let shader_name = path
+            .file_stem()
+            .map(|file_name_os_str| file_name_os_str.to_str())
+            .map(|file_name_str| String::from(file_name_str.unwrap()));
 
         match shader_name {
             Some(name) => {
