@@ -2,12 +2,43 @@ use core::fmt;
 use log::{debug, error};
 use std::fmt::Display;
 
-pub struct Bitmap {}
+pub struct Bitmap {
+    file_header: FileHeader,
+    device_independent_header: DeviceIndependentBitmapType,
+    color_block: ColorBlockType,
+    pixel_array: Vec<[u8; 4]>,
+}
 
+impl Bitmap {
+    pub fn get_pixel_array(&self) -> &Vec<[u8; 4]> {
+        &self.pixel_array
+    }
+
+    pub fn get_width(&self) -> usize {
+        match &self.device_independent_header {
+            DeviceIndependentBitmapType::Windows3_1(header) => {
+                header.width.unsigned_abs() as usize
+            }
+            _ => unreachable!("Only BITMAPINFOHEADER formatted Bitmaps are supported at this time; no other type should be creatable.")
+        }
+    }
+
+    pub fn get_height(&self) -> usize {
+        match &self.device_independent_header {
+            DeviceIndependentBitmapType::Windows3_1(header) => header.height.unsigned_abs() as usize, 
+            _ => unreachable!("Only BITMAPINFOHEADER formatted Bitmaps are supported at this time; no other type should be creatable.")
+        }
+    }
+}
+
+#[derive(Debug)]
 pub enum BitmapError {
     UnknownHeader,
     UnknownDIBHeader,
     UnsupportedDIBHeader,
+    UnsupportedBitmapType,
+    PixelIndexOutOfRange,
+    MissingColorTableForIndexedBitmap,
 }
 
 type Header = [u8; 14];
@@ -42,6 +73,12 @@ impl Display for BitmapType {
             BitmapType::OS2Pointer => write!(f, "OS/2 Bitmap Pointer"),
         }
     }
+}
+
+struct FileHeader {
+    pub bitmap_type: BitmapType,
+    pub bitmap_size: usize,
+    pub pixel_array_start: usize,
 }
 
 #[derive(Debug)]
@@ -115,12 +152,25 @@ struct OS22XBitmapHeaderV1 {
     pub application_defined: u32,
 }
 
-struct ColorBlock<T> {
+enum ColorBlockType {
+    RGBColorBlock(ColorBlockRGB),
+    RGBAColorBlock(ColorBlockRGBA),
+}
+
+struct ColorBlockRGB {
     pub red_mask: Option<u32>,
     pub green_mask: Option<u32>,
     pub blue_mask: Option<u32>,
     pub alpha_mask: Option<u32>,
-    pub color_table: Option<Vec<T>>,
+    pub color_table: Option<Vec<RGB>>,
+}
+
+struct ColorBlockRGBA {
+    pub red_mask: Option<u32>,
+    pub green_mask: Option<u32>,
+    pub blue_mask: Option<u32>,
+    pub alpha_mask: Option<u32>,
+    pub color_table: Option<Vec<RGBA>>,
 }
 
 pub fn new(contents: &[u8]) -> Result<Bitmap, BitmapError> {
@@ -131,18 +181,19 @@ pub fn new(contents: &[u8]) -> Result<Bitmap, BitmapError> {
     }
 
     let header: Header = contents[0..14].try_into().unwrap();
-    let bmp_type = decode_type(&header)?;
-    let bmp_size = decode_size(&header);
-    let bmp_pixel_start = decode_pixel_array_start_address(&header);
+    let file_header = decode_file_header(&header)?;
+    // let bmp_type = decode_type(&header)?;
+    // let bmp_size = decode_size(&header);
+    // let bmp_pixel_start = decode_pixel_array_start_address(&header);
 
-    debug!("Header type: {}", bmp_type);
-    debug!("Header size: {}", bmp_size);
-    debug!("Pixel data start: {}", bmp_pixel_start);
+    debug!("Header type: {}", file_header.bitmap_type);
+    debug!("Header size: {}", file_header.bitmap_size);
+    debug!("Pixel data start: {}", file_header.pixel_array_start);
 
     let dib_header_section: [u8; 124] = contents[14..138].try_into().unwrap();
     let dib_header = decode_dib_header(&dib_header_section)?;
 
-    match dib_header {
+    match &dib_header {
         DeviceIndependentBitmapType::Windows3_1(win_3_1_header) => {
             debug!("Win 3.1 Header Info: ");
             debug!("  Width:        {}", win_3_1_header.width);
@@ -167,40 +218,121 @@ pub fn new(contents: &[u8]) -> Result<Bitmap, BitmapError> {
                 "  Important Color Count: {}",
                 win_3_1_header.important_colors_count
             );
-            let color_block = decode_windows_31_color_block(&contents[54..], &win_3_1_header);
+            let color_block = decode_windows_31_color_block(&contents[54..], win_3_1_header);
             debug!("Color block info: ");
             debug!("  red_bitmask:   {:?}", color_block.red_mask);
             debug!("  green_bitmask: {:?}", color_block.green_mask);
             debug!("  blue_bitmask:  {:?}", color_block.blue_mask);
             if color_block.color_table.is_some() {
-                debug!("  table count:  {}", color_block.color_table.unwrap().len());
+                debug!("  Color palette is non-empty.",);
             } else {
                 debug!("  table count:  None");
             }
+
+            let unpacked_pixel_array = decode_windows_31_pixels(
+                win_3_1_header,
+                &contents[file_header.pixel_array_start..],
+                &color_block,
+            )?;
+
+            Ok(Bitmap {
+                file_header,
+                device_independent_header: dib_header,
+                color_block: ColorBlockType::RGBAColorBlock(color_block),
+                pixel_array: unpacked_pixel_array,
+            })
         }
         other_type => {
             error!("Unexpectedly complex bitmap.  Oops: {:?}", other_type);
+            Err(BitmapError::UnsupportedBitmapType)
         }
     }
-
-    Ok(Bitmap {})
 }
 
-fn decode_windows_31_pixels(color_depth: u8, stride: usize, pixel_store: &[u8]) {
-    let bytes_per_color = color_depth / 4;
-    let data_bytes_per_row = stride * bytes_per_color as usize;
+fn decode_file_header(file_header: &[u8; 14]) -> Result<FileHeader, BitmapError> {
+    let bmp_type = decode_type(file_header)?;
+    let bmp_size = decode_size(file_header);
+    let bmp_pixel_start = decode_pixel_array_start_address(file_header);
+
+    Ok(FileHeader {
+        bitmap_type: bmp_type,
+        bitmap_size: bmp_size as usize,
+        pixel_array_start: bmp_pixel_start as usize,
+    })
+}
+
+fn decode_windows_31_pixels(
+    device_independent_header: &Windows3_1BitmapHeader,
+    pixel_array: &[u8],
+    color_block: &ColorBlockRGBA,
+) -> Result<Vec<[u8; 4]>, BitmapError> {
+    let color_depth = device_independent_header.color_depth as usize;
+    let stride = device_independent_header.width as usize;
+    let rows = device_independent_header.height.unsigned_abs() as usize;
+    let fill_direction_up = device_independent_header.height >= 0;
+
+    let bytes_per_color = color_depth / 8;
+    let data_bytes_per_row = stride * bytes_per_color;
     let padding = (4 - data_bytes_per_row % 4) % 4;
 
     debug!(
         "Beginning pixel read: {} {}-bpp pixels per row with {} bytes padding at the end.",
         stride, color_depth, padding
     );
+
+    let mut unpacked_pixel_array = Vec::<[u8; 4]>::with_capacity(stride * rows * 4);
+
+    let mut current_byte = 0;
+
+    for _row in 0..rows {
+        for _pixel in 0..stride {
+            let next_pixel: &[u8] = &pixel_array[current_byte..(current_byte + bytes_per_color)];
+            let pixel_color = translate_color(
+                next_pixel,
+                device_independent_header,
+                &color_block.color_table,
+            )?;
+            if fill_direction_up {
+                unpacked_pixel_array.insert(0, pixel_color);
+            } else {
+                unpacked_pixel_array.push(pixel_color);
+            }
+
+            current_byte += bytes_per_color;
+        }
+
+        current_byte += padding;
+    }
+
+    Ok(unpacked_pixel_array)
+}
+
+fn translate_color(
+    source_color: &[u8],
+    header: &Windows3_1BitmapHeader,
+    color_table: &Option<Vec<[u8; 4]>>,
+) -> Result<[u8; 4], BitmapError> {
+    match header.color_depth {
+        32 => Ok(source_color.try_into().unwrap()),
+        24 => Ok([source_color[2], source_color[1], source_color[0], 255]),
+        16 | 8 => {
+            let index = usize::from_le_bytes(source_color.try_into().unwrap());
+            match color_table {
+                Some(table) => match table.get(index) {
+                    Some(color) => Ok(*color),
+                    None => Err(BitmapError::PixelIndexOutOfRange),
+                },
+                None => Err(BitmapError::MissingColorTableForIndexedBitmap),
+            }
+        }
+        _ => Err(BitmapError::UnsupportedBitmapType),
+    }
 }
 
 fn decode_windows_31_color_block(
     block: &[u8],
     reference_header: &Windows3_1BitmapHeader,
-) -> ColorBlock<RGBA> {
+) -> ColorBlockRGBA {
     let (offset, red, green, blue, alpha) = match reference_header.compression {
         BmpCompression::Huffman1D => (
             12,
@@ -234,7 +366,7 @@ fn decode_windows_31_color_block(
         None
     };
 
-    ColorBlock {
+    ColorBlockRGBA {
         red_mask: red,
         green_mask: green,
         blue_mask: blue,

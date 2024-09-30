@@ -3,6 +3,7 @@ use ash::vk::{
     ImageUsageFlags, SampleCountFlags, Semaphore, SharingMode,
 };
 use graphics::image::DustImage;
+use graphics::pools::{get_graphics_queue_family, get_transfer_queue_family};
 use graphics::{bitmap, pools, transfer};
 use log::debug;
 
@@ -45,7 +46,43 @@ fn main() {
     // show_physical_memory_stats(&vk_context);
 
     let sample_bmp_data = load_sample_bmp();
-    bitmap::new(&sample_bmp_data);
+    let hud_bar = match bitmap::new(&sample_bmp_data) {
+        Ok(bar) => bar,
+        Err(bitmap_error) => {
+            panic!("The bitmap failed to load: {:?}", bitmap_error);
+        }
+    };
+
+    let (hud_image, transfer_complete_semaphore) = transfer::copy_to_image(
+        hud_bar.get_pixel_array(),
+        &vk_context,
+        &ImageCreateInfo::default()
+            .format(Format::R8G8B8_UINT)
+            .flags(ImageCreateFlags::empty())
+            .extent(
+                Extent3D::default()
+                    .depth(1)
+                    .width(hud_bar.get_width() as u32)
+                    .height(hud_bar.get_height() as u32),
+            )
+            .usage(ImageUsageFlags::INPUT_ATTACHMENT)
+            .tiling(ImageTiling::OPTIMAL)
+            .samples(SampleCountFlags::TYPE_1)
+            .mip_levels(1)
+            .sharing_mode(SharingMode::EXCLUSIVE)
+            .array_layers(1)
+            .image_type(ImageType::TYPE_2D)
+            .initial_layout(ImageLayout::TRANSFER_DST_OPTIMAL),
+        ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+        get_graphics_queue_family(),
+    );
+
+    debug!(
+        "The HUD bar has size {} x {}, total of {} pixels.",
+        hud_bar.get_width(),
+        hud_bar.get_height(),
+        hud_bar.get_pixel_array().len()
+    );
 
     // let (gradient, semaphore) = load_gradient(&vk_context);
     // graphics::render::composite_test(&vk_context, &gradient.view, gradient.format, semaphore);
