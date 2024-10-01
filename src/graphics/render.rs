@@ -23,7 +23,49 @@ use crate::{graphics::shaders, setup::instance::VkContext};
 
 use super::{swapchain, util};
 
-pub fn composite_test(
+pub fn composite_hud(
+    ctxt: &VkContext,
+    hud_image: &ImageView,
+    view_fmt: Format,
+    image_ready: Semaphore,
+) {
+    // Steps to win:
+    // 1.  Get swapchain image.
+    //     a.  Create a swapchain-drawing-on-this-image-complete Semaphore
+    //     b.  Issue request for the Swapchain image.
+    // 2.  Build DescriptorSetLayout
+    //     a.  Set the type: INPUT_ATTACHMENT
+    //     b.  This is for a single binding, and a single descriptor within the binding.
+    //     c.  Ensure the binding number is 0.
+    // 3.  Get the DescriptorSet.
+    //     a.  There's not much more to this, other than making sure the DescriptorSet and the
+    //         DescriptorSetLayout are used in the correct places.
+    // 4.  Build RenderPass
+    //     a.  Construct the AttachmentReferences
+    //     b.  Construct the AttachmentDescriptions
+    //     c.  Construct the render subpass
+    // 5.  Build Framebuffer.
+    //     a.  Set the attachments in order swapchain, hud
+    //     b.  Set the width and height of the framebuffer
+    //     c.  Set the render pass
+    // 6.  Build PipelineLayout.
+    //     a.  Associate the DescriptorSetLayouts with the PipelineLayoutCreateInfo
+    //     b.  That's actually about it.
+    // 7.  Build GraphicsPipeline.
+    //     a.  There's a lot here.
+    //     b.  Shader stage, input assembly, vertex, viewport,
+    // 8.  Begin recording command buffer.
+    // 9.  Begin render pass.
+    // 10. Bind Pipeline to command buffer.
+    // 11. Bind DescriptorSets to the command command_buffer
+    // 12. Issue cmdDraw with no vertices
+    // 13. End render pass
+    // 14. End command buffer recording.
+    // 15. Issue command buffer on the Graphics queue
+    // 16. Present the swapchain image to the presentation engine.
+}
+
+pub fn old_composite_test(
     ctxt: &VkContext,
     bg_image_view: &ImageView,
     view_fmt: Format,
