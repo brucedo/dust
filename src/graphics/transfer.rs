@@ -310,6 +310,8 @@ where
     T: Sized + Copy + Clone,
 {
     let size_in_bytes = std::mem::size_of_val(data) as u64;
+    debug!("Size of val: {}", size_in_bytes);
+    debug!("Size of data array itself: {}", data.len());
 
     let transfer_buffer = make_buffer(
         ctxt,
@@ -338,6 +340,7 @@ where
     let t_ptr = void_ptr as *mut T;
     // let u8_ptr = void_ptr as *mut u8;
     let t_buf = unsafe { std::slice::from_raw_parts_mut(t_ptr, size_in_bytes as usize) };
+    debug!("Transfer buffer size: {}", t_buf.len());
 
     t_buf.copy_from_slice(data);
 

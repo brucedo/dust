@@ -3,6 +3,7 @@ use std::sync::OnceLock;
 
 use ash::vk::DescriptorPool;
 use ash::vk::DescriptorPoolCreateInfo;
+use ash::vk::DescriptorPoolResetFlags;
 use ash::vk::DescriptorPoolSize;
 use ash::vk::DescriptorSet;
 use ash::vk::DescriptorSetAllocateInfo;
@@ -10,6 +11,7 @@ use ash::vk::DescriptorSetLayout;
 use ash::vk::DescriptorType;
 use ash::vk::{CommandBuffer, CommandBufferAllocateInfo, CommandBufferLevel, CommandPool};
 use ash::Device;
+use log::error;
 
 use crate::setup::instance::VkContext;
 
@@ -78,11 +80,26 @@ pub fn init(
 
 pub fn destroy(ctxt: &VkContext) {
     unsafe {
-        ctxt.logical_device
-            .destroy_command_pool(*GRAPHICS_POOL.get().unwrap(), None);
-        ctxt.logical_device
-            .destroy_command_pool(*TRANSFER_POOL.get().unwrap(), None);
-
+        match (
+            LOGICAL_DEVICE.get(),
+            GRAPHICS_POOL.get(),
+            TRANSFER_POOL.get(),
+            DESCRIPTOR_SET_POOL.get(),
+        ) {
+            (Some(device), Some(graphics_pool), Some(transfer_pool), Some(descriptor_set_pool)) => {
+                device.destroy_descriptor_pool(*descriptor_set_pool, None);
+                device.destroy_command_pool(*graphics_pool, None);
+                device.destroy_command_pool(*transfer_pool, None);
+            }
+            _ => {
+                error!("The pools or the device were removed prior to the destroy action being invoked.");
+            }
+        }
+        // ctxt.logical_device
+        //     .destroy_command_pool(*GRAPHICS_POOL.get().unwrap(), None);
+        // ctxt.logical_device
+        //     .destroy_command_pool(*TRANSFER_POOL.get().unwrap(), None);
+        //
         // ctxt.transfer_queue_command_pools
         //     .drain(0..self.transfer_queue_command_pools.len())
         //     .for_each(|pool| self.logical_device.destroy_command_pool(pool, None));
@@ -193,6 +210,25 @@ pub fn allocate_image_descriptor_set(layouts: &[DescriptorSetLayout]) -> Vec<Des
         }
         _ => {
             panic!("The device has not been set.  The Vulkan environment is not configured.  Cannot continue.");
+        }
+    }
+}
+
+pub fn reset_image_descriptors() {
+    match (LOGICAL_DEVICE.get(), DESCRIPTOR_SET_POOL.get()) {
+        (Some(device), Some(pool)) => {
+            match unsafe { device.reset_descriptor_pool(*pool, DescriptorPoolResetFlags::empty()) }
+            {
+                Ok(_) => {
+                    allocate_descriptor_set_pool(device);
+                }
+                Err(msg) => {
+                    panic!("Failed to reset the descriptor pool: {:?}", msg);
+                }
+            }
+        }
+        _ => {
+            panic!("Either the devire or the descriptor pool is unset.  Cannot continue.");
         }
     }
 }

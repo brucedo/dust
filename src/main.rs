@@ -57,7 +57,7 @@ fn main() {
         hud_bar.get_pixel_array(),
         &vk_context,
         &ImageCreateInfo::default()
-            .format(Format::R8G8B8_UINT)
+            .format(Format::R8G8B8A8_SRGB)
             .flags(ImageCreateFlags::empty())
             .extent(
                 Extent3D::default()
@@ -82,6 +82,13 @@ fn main() {
         hud_bar.get_width(),
         hud_bar.get_height(),
         hud_bar.get_pixel_array().len()
+    );
+
+    graphics::render::composite_hud(
+        &vk_context,
+        &hud_image.view,
+        hud_image.format,
+        transfer_complete_semaphore,
     );
 
     // let (gradient, semaphore) = load_gradient(&vk_context);

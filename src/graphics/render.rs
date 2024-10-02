@@ -1,27 +1,30 @@
 use ash::vk::{
     AccessFlags, AttachmentDescription, AttachmentDescriptionFlags, AttachmentLoadOp,
     AttachmentReference, AttachmentStoreOp, ClearColorValue, ClearValue, ColorComponentFlags,
-    CommandBufferBeginInfo, CommandBufferUsageFlags, CullModeFlags, Extent2D, Fence, Format,
-    Framebuffer, FramebufferCreateInfo, FrontFace, GraphicsPipelineCreateInfo, ImageLayout,
-    ImageView, Offset2D, Pipeline, PipelineBindPoint, PipelineCache,
-    PipelineColorBlendAttachmentState, PipelineColorBlendStateCreateInfo, PipelineCreateFlags,
-    PipelineInputAssemblyStateCreateFlags, PipelineInputAssemblyStateCreateInfo, PipelineLayout,
-    PipelineLayoutCreateFlags, PipelineLayoutCreateInfo, PipelineMultisampleStateCreateFlags,
+    CommandBufferBeginInfo, CommandBufferResetFlags, CommandBufferUsageFlags, CullModeFlags,
+    DependencyFlags, DependencyInfo, DescriptorImageInfo, DescriptorSet, DescriptorSetLayout,
+    DescriptorSetLayoutBinding, DescriptorSetLayoutCreateFlags, DescriptorSetLayoutCreateInfo,
+    DescriptorType, Extent2D, Fence, Format, Framebuffer, FramebufferCreateInfo, FrontFace,
+    GraphicsPipelineCreateInfo, ImageLayout, ImageView, MemoryBarrier, MemoryBarrier2, Offset2D,
+    Pipeline, PipelineBindPoint, PipelineCache, PipelineColorBlendAttachmentState,
+    PipelineColorBlendStateCreateInfo, PipelineCreateFlags, PipelineInputAssemblyStateCreateFlags,
+    PipelineInputAssemblyStateCreateInfo, PipelineLayout, PipelineLayoutCreateFlags,
+    PipelineLayoutCreateInfo, PipelineMultisampleStateCreateFlags,
     PipelineMultisampleStateCreateInfo, PipelineRasterizationStateCreateFlags,
     PipelineRasterizationStateCreateInfo, PipelineShaderStageCreateFlags,
     PipelineShaderStageCreateInfo, PipelineStageFlags, PipelineVertexInputStateCreateFlags,
     PipelineVertexInputStateCreateInfo, PipelineViewportStateCreateFlags,
-    PipelineViewportStateCreateInfo, PolygonMode, PrimitiveTopology, Rect2D, RenderPass,
-    RenderPassBeginInfo, RenderPassCreateFlags, RenderPassCreateInfo, SampleCountFlags, Semaphore,
-    ShaderStageFlags, SubmitInfo, SubpassContents, SubpassDependency, SubpassDescription,
-    SubpassDescriptionFlags, Viewport, SUBPASS_EXTERNAL,
+    PipelineViewportStateCreateInfo, PolygonMode, PrimitiveTopology, PushConstantRange, Rect2D,
+    RenderPass, RenderPassBeginInfo, RenderPassCreateFlags, RenderPassCreateInfo, RenderingInfo,
+    SampleCountFlags, Semaphore, ShaderStageFlags, SubmitInfo, SubpassContents, SubpassDependency,
+    SubpassDescription, SubpassDescriptionFlags, Viewport, WriteDescriptorSet, SUBPASS_EXTERNAL,
 };
 
 use log::debug;
 
 use crate::{graphics::shaders, setup::instance::VkContext};
 
-use super::{swapchain, util};
+use super::{pools, swapchain, util};
 
 pub fn composite_hud(
     ctxt: &VkContext,
@@ -29,40 +32,178 @@ pub fn composite_hud(
     view_fmt: Format,
     image_ready: Semaphore,
 ) {
+    // Just to satisfy a lifetime requirement later on...
+    let image_ready_array = [image_ready];
     // Steps to win:
     // 1.  Get swapchain image.
     //     a.  Create a swapchain-drawing-on-this-image-complete Semaphore
     //     b.  Issue request for the Swapchain image.
+    let swapchain_acquisition_semaphore = util::create_binary_semaphore(ctxt);
+    let render_complete_semaphore = [util::create_binary_semaphore(ctxt)];
+    let render_complete_fence = util::create_fence(ctxt);
+    let (index, swapchain_image, _suboptimal) =
+        swapchain::next_swapchain_image(swapchain_acquisition_semaphore, Fence::null());
     // 2.  Build DescriptorSetLayout
     //     a.  Set the type: INPUT_ATTACHMENT
     //     b.  This is for a single binding, and a single descriptor within the binding.
     //     c.  Ensure the binding number is 0.
+    let descriptor_set_layouts = [create_descriptor_set_layout(ctxt)];
     // 3.  Get the DescriptorSet.
     //     a.  There's not much more to this, other than making sure the DescriptorSet and the
     //         DescriptorSetLayout are used in the correct places.
+    let descriptor_set = pools::allocate_image_descriptor_set(&descriptor_set_layouts);
+    let hud_descriptor_set = descriptor_set.first().unwrap();
+    let descriptor_sets = [*hud_descriptor_set];
+    load_hud_descriptor_set(ctxt, *hud_descriptor_set, *hud_image);
     // 4.  Build RenderPass
     //     a.  Construct the AttachmentReferences
     //     b.  Construct the AttachmentDescriptions
     //     c.  Construct the render subpass
+    let render_pass = make_render_pass(ctxt, view_fmt);
     // 5.  Build Framebuffer.
     //     a.  Set the attachments in order swapchain, hud
     //     b.  Set the width and height of the framebuffer
     //     c.  Set the render pass
+    let attachments = vec![*swapchain_image, *hud_image];
+    let framebuffer = make_framebuffer(ctxt, render_pass, &attachments);
     // 6.  Build PipelineLayout.
     //     a.  Associate the DescriptorSetLayouts with the PipelineLayoutCreateInfo
     //     b.  That's actually about it.
+    let pipeline_layout = create_pipeline_layout(ctxt, Some(&descriptor_set_layouts), None);
     // 7.  Build GraphicsPipeline.
     //     a.  There's a lot here.
-    //     b.  Shader stage, input assembly, vertex, viewport,
+    //     b.  Shader stage, input assembly, vertex, viewport, rasterization state,
+    //         multisample state, and probably a couple of others I am forgetting.
+    //     c.  Pipeline must be hooked to pipeline layout
+    //     d.  Pipeline I think must be hooked to render pass and/or subpass.
+    let graphics_pipeline = make_pipeline(ctxt, render_pass, pipeline_layout);
     // 8.  Begin recording command buffer.
-    // 9.  Begin render pass.
-    // 10. Bind Pipeline to command buffer.
-    // 11. Bind DescriptorSets to the command command_buffer
-    // 12. Issue cmdDraw with no vertices
-    // 13. End render pass
-    // 14. End command buffer recording.
-    // 15. Issue command buffer on the Graphics queue
+    //     a.  Might be wise to reset either the entire pool, or at the least the buffer.
+    let command_buffer = pools::reserve_graphics_buffer(ctxt);
+
+    if let Err(msg) = unsafe {
+        ctxt.logical_device
+            .reset_command_buffer(command_buffer, CommandBufferResetFlags::empty())
+    } {
+        panic!("Could not reset the command buffer: {:?}", msg);
+    }
+
+    unsafe {
+        let command_buffer_begin_info =
+            CommandBufferBeginInfo::default().flags(CommandBufferUsageFlags::ONE_TIME_SUBMIT);
+        if let Err(msg) = ctxt
+            .logical_device
+            .begin_command_buffer(command_buffer, &command_buffer_begin_info)
+        {
+            panic!("The command buffer begin record command failed: {:?}", msg);
+        }
+
+        // 11. Bind DescriptorSets to the command command_buffer
+        //     a.  for this example, there will be set 0, binding 0, single element.
+        ctxt.logical_device.cmd_bind_descriptor_sets(
+            command_buffer,
+            PipelineBindPoint::GRAPHICS,
+            pipeline_layout,
+            0,
+            &descriptor_sets,
+            &[],
+        );
+
+        // 9.  Begin render pass.
+        let clear_value = ClearColorValue {
+            int32: [0, 0, 0, 0],
+        };
+        let clear_values = [ClearValue { color: clear_value }];
+        let render_pass_info = RenderPassBeginInfo::default()
+            .clear_values(&clear_values)
+            .render_pass(render_pass)
+            .framebuffer(framebuffer)
+            .render_area(
+                Rect2D::default()
+                    .offset(Offset2D::default().x(501).y(989))
+                    .extent(Extent2D::default().width(918).height(91)),
+            );
+        ctxt.logical_device.cmd_begin_render_pass(
+            command_buffer,
+            &render_pass_info,
+            SubpassContents::INLINE,
+        );
+
+        // 10. Bind Pipeline to command buffer.
+        ctxt.logical_device.cmd_bind_pipeline(
+            command_buffer,
+            PipelineBindPoint::GRAPHICS,
+            graphics_pipeline,
+        );
+
+        // 11.5  We may also need to put a pipeline barrier in place specifically to force
+        //       the fragment operations to wait for the HUD image semaphore and as well the
+        //       swapchain image acquisition.
+        // 12. Issue cmdDraw with no vertices
+        //     b.  Here's really hoping this works...
+        ctxt.logical_device.cmd_draw(command_buffer, 0, 1, 0, 0);
+        // 13. End render pass
+        ctxt.logical_device.cmd_end_render_pass(command_buffer);
+
+        // 14. End command buffer recording.
+        if let Err(msg) = ctxt.logical_device.end_command_buffer(command_buffer) {
+            panic!("Unable to end command buffer: {:?}", msg);
+        }
+
+        // 15. Issue command buffer on the Graphics queue
+        let command_buffers = [command_buffer];
+        let submit_info = SubmitInfo::default()
+            .wait_semaphores(&image_ready_array)
+            .wait_dst_stage_mask(&[PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT])
+            .signal_semaphores(&render_complete_semaphore)
+            .command_buffers(&command_buffers);
+
+        if let Err(msg) = ctxt.logical_device.queue_submit(
+            ctxt.graphics_queue,
+            &[submit_info],
+            render_complete_fence,
+        ) {
+            panic!("The queue submit attempt failed: {:?}", msg);
+        }
+    }
+
     // 16. Present the swapchain image to the presentation engine.
+    //     a.  This should wait for the cmomand buffer semaphore to signal before issuing.
+    //     b.  This should also create a fence to signal when the last step is done to barrier
+    //     cleanup.
+    if let Err(msg) =
+        swapchain::present_swapchain_image(index, &ctxt.graphics_queue, &render_complete_semaphore)
+    {
+        panic!("The presentation attempt failed: {:?}", msg);
+    }
+
+    // 17.  Destroy all items created: this should wait until the presentation complete fence from
+    //      16 triggers.
+    if let Err(msg) = unsafe {
+        ctxt.logical_device
+            .wait_for_fences(&[render_complete_fence], true, 10000000)
+    } {
+        panic!("Waiting for the damn fence failed: {:?}", msg);
+    }
+
+    unsafe {
+        ctxt.logical_device
+            .destroy_fence(render_complete_fence, None);
+        ctxt.logical_device
+            .destroy_semaphore(swapchain_acquisition_semaphore, None);
+        ctxt.logical_device
+            .destroy_semaphore(render_complete_semaphore[0], None);
+        ctxt.logical_device.destroy_semaphore(image_ready, None);
+        ctxt.logical_device.destroy_framebuffer(framebuffer, None);
+        ctxt.logical_device.destroy_render_pass(render_pass, None);
+        ctxt.logical_device
+            .destroy_pipeline_layout(pipeline_layout, None);
+        ctxt.logical_device
+            .destroy_pipeline(graphics_pipeline, None);
+        ctxt.logical_device
+            .destroy_descriptor_set_layout(descriptor_set_layouts[0], None);
+        pools::reset_image_descriptors();
+    }
 }
 
 pub fn old_composite_test(
@@ -95,7 +236,7 @@ pub fn old_composite_test(
     // let clear_values = [clear_value, clear_value];
     let clear_values = [clear_value];
 
-    let pipeline_layout = create_pipeline_layout(ctxt);
+    let pipeline_layout = create_pipeline_layout(ctxt, None, None);
     let pipeline = make_pipeline(ctxt, render_pass, pipeline_layout);
 
     let buffer = crate::graphics::pools::reserve_graphics_buffer(ctxt);
@@ -430,11 +571,18 @@ fn fill_pipeline_shader_stage_infos<'a>() -> Vec<PipelineShaderStageCreateInfo<'
     vec![vertex_shader_stage_info, compositor_shader_stage_info]
 }
 
-fn create_pipeline_layout(ctxt: &VkContext) -> PipelineLayout {
-    let create_info = PipelineLayoutCreateInfo::default()
-        .flags(PipelineLayoutCreateFlags::empty())
-        .push_constant_ranges(&[])
-        .set_layouts(&[]);
+fn create_pipeline_layout(
+    ctxt: &VkContext,
+    descriptor_layouts: Option<&[DescriptorSetLayout]>,
+    push_constant_ranges: Option<&[PushConstantRange]>,
+) -> PipelineLayout {
+    let create_info = PipelineLayoutCreateInfo::default().flags(PipelineLayoutCreateFlags::empty());
+    if let Some(layouts) = descriptor_layouts {
+        create_info.set_layouts(layouts);
+    }
+    if let Some(push_constants) = push_constant_ranges {
+        create_info.push_constant_ranges(push_constants);
+    }
 
     match unsafe {
         ctxt.logical_device
@@ -511,4 +659,50 @@ fn create_attachment_colorblend_state() -> PipelineColorBlendAttachmentState {
     PipelineColorBlendAttachmentState::default()
         .color_write_mask(ColorComponentFlags::RGBA)
         .blend_enable(false)
+}
+
+fn create_descriptor_set_layout(ctxt: &VkContext) -> DescriptorSetLayout {
+    let descriptor_set_bindings = [create_descriptor_set_bindings()];
+    let descriptor_set_layout_create_info = DescriptorSetLayoutCreateInfo::default()
+        .flags(DescriptorSetLayoutCreateFlags::empty())
+        .bindings(&descriptor_set_bindings);
+
+    match unsafe {
+        ctxt.logical_device
+            .create_descriptor_set_layout(&descriptor_set_layout_create_info, None)
+    } {
+        Ok(layout) => layout,
+        Err(msg) => {
+            panic!(
+                "The request to create a descriptor set layout failed: {:?}",
+                msg
+            );
+        }
+    }
+}
+
+fn create_descriptor_set_bindings<'a>() -> DescriptorSetLayoutBinding<'a> {
+    DescriptorSetLayoutBinding::default()
+        .stage_flags(ShaderStageFlags::FRAGMENT)
+        .descriptor_type(DescriptorType::INPUT_ATTACHMENT)
+        .binding(0)
+        .descriptor_count(1)
+}
+
+fn load_hud_descriptor_set(ctxt: &VkContext, descriptor_set: DescriptorSet, hud_image: ImageView) {
+    let image_info = [DescriptorImageInfo::default()
+        .image_view(hud_image)
+        .image_layout(ImageLayout::SHADER_READ_ONLY_OPTIMAL)];
+    let write_descriptors = [WriteDescriptorSet::default()
+        .dst_binding(0)
+        .descriptor_count(1)
+        .descriptor_type(DescriptorType::INPUT_ATTACHMENT)
+        .dst_set(descriptor_set)
+        .dst_array_element(0)
+        .image_info(&image_info)];
+
+    unsafe {
+        ctxt.logical_device
+            .update_descriptor_sets(&write_descriptors, &[])
+    };
 }
