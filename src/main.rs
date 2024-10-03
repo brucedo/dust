@@ -65,14 +65,14 @@ fn main() {
                     .width(hud_bar.get_width() as u32)
                     .height(hud_bar.get_height() as u32),
             )
-            .usage(ImageUsageFlags::INPUT_ATTACHMENT)
+            .usage(ImageUsageFlags::INPUT_ATTACHMENT | ImageUsageFlags::TRANSFER_DST)
             .tiling(ImageTiling::OPTIMAL)
             .samples(SampleCountFlags::TYPE_1)
             .mip_levels(1)
             .sharing_mode(SharingMode::EXCLUSIVE)
             .array_layers(1)
             .image_type(ImageType::TYPE_2D)
-            .initial_layout(ImageLayout::TRANSFER_DST_OPTIMAL),
+            .initial_layout(ImageLayout::UNDEFINED),
         ImageLayout::SHADER_READ_ONLY_OPTIMAL,
         get_graphics_queue_family(),
     );

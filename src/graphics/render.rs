@@ -33,7 +33,6 @@ pub fn composite_hud(
     image_ready: Semaphore,
 ) {
     // Just to satisfy a lifetime requirement later on...
-    let image_ready_array = [image_ready];
     // Steps to win:
     // 1.  Get swapchain image.
     //     a.  Create a swapchain-drawing-on-this-image-complete Semaphore
@@ -43,6 +42,7 @@ pub fn composite_hud(
     let render_complete_fence = util::create_fence(ctxt);
     let (index, swapchain_image, _suboptimal) =
         swapchain::next_swapchain_image(swapchain_acquisition_semaphore, Fence::null());
+    let image_ready_array = vec![image_ready, swapchain_acquisition_semaphore];
     // 2.  Build DescriptorSetLayout
     //     a.  Set the type: INPUT_ATTACHMENT
     //     b.  This is for a single binding, and a single descriptor within the binding.
@@ -87,6 +87,10 @@ pub fn composite_hud(
     } {
         panic!("Could not reset the command buffer: {:?}", msg);
     }
+    debug!(
+        "Just for the absolute shit of it - what's the graphics queue? {}",
+        pools::get_graphics_queue_family()
+    );
 
     unsafe {
         let command_buffer_begin_info =
@@ -154,9 +158,22 @@ pub fn composite_hud(
         let command_buffers = [command_buffer];
         let submit_info = SubmitInfo::default()
             .wait_semaphores(&image_ready_array)
-            .wait_dst_stage_mask(&[PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT])
+            .wait_dst_stage_mask(&[
+                PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+            ])
             .signal_semaphores(&render_complete_semaphore)
             .command_buffers(&command_buffers);
+
+        debug!(
+            "What is the submit info semaphore count?!?!?! {}",
+            submit_info.wait_semaphore_count
+        );
+
+        debug!(
+            "What is the fucking number of things in image_ready_array?!!?!?!! {}",
+            image_ready_array.len()
+        );
 
         if let Err(msg) = ctxt.logical_device.queue_submit(
             ctxt.graphics_queue,
@@ -576,13 +593,19 @@ fn create_pipeline_layout(
     descriptor_layouts: Option<&[DescriptorSetLayout]>,
     push_constant_ranges: Option<&[PushConstantRange]>,
 ) -> PipelineLayout {
-    let create_info = PipelineLayoutCreateInfo::default().flags(PipelineLayoutCreateFlags::empty());
-    if let Some(layouts) = descriptor_layouts {
-        create_info.set_layouts(layouts);
-    }
-    if let Some(push_constants) = push_constant_ranges {
-        create_info.push_constant_ranges(push_constants);
-    }
+    let mut create_info =
+        PipelineLayoutCreateInfo::default().flags(PipelineLayoutCreateFlags::empty());
+    create_info = if let Some(layouts) = descriptor_layouts {
+        debug!("Size of layouts being bound: {}", layouts.len());
+        create_info.set_layouts(layouts)
+    } else {
+        create_info
+    };
+    create_info = if let Some(push_constants) = push_constant_ranges {
+        create_info.push_constant_ranges(push_constants)
+    } else {
+        create_info
+    };
 
     match unsafe {
         ctxt.logical_device

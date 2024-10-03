@@ -16,4 +16,5 @@ glslc -o $FRAGMENT_TARGET/compositor.spv --target-env=vulkan1.3 src/graphics/sha
 export VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation;VK_LAYER_LUNARG_api_dump
 export VK_LOADER_LAYERS_ENABLE=*validation
 export RUST_LOG=debug
+cargo build
 cargo run

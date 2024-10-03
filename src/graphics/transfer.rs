@@ -263,7 +263,7 @@ fn run_commands_blocking(
 ) {
     let submit_info = SubmitInfo::default()
         .command_buffers(buffers)
-        .wait_semaphores(&[])
+        // .wait_semaphores(&[])
         .signal_semaphores(signal_complete_semaphore)
         .wait_dst_stage_mask(&[]);
     let submits = vec![submit_info];
@@ -339,7 +339,7 @@ where
 
     let t_ptr = void_ptr as *mut T;
     // let u8_ptr = void_ptr as *mut u8;
-    let t_buf = unsafe { std::slice::from_raw_parts_mut(t_ptr, size_in_bytes as usize) };
+    let t_buf = unsafe { std::slice::from_raw_parts_mut(t_ptr, data.len()) };
     debug!("Transfer buffer size: {}", t_buf.len());
 
     t_buf.copy_from_slice(data);
