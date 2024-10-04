@@ -53,18 +53,15 @@ fn main() {
         }
     };
 
-    let (hud_image, transfer_complete_semaphore) = transfer::copy_to_image(
-        hud_bar.get_pixel_array(),
+    let full_image = embed_hud_in_huge_image(hud_bar);
+
+    let (finished, transfer_complete_semaphore) = transfer::copy_to_image(
+        &full_image, //.get_pixel_array(),
         &vk_context,
         &ImageCreateInfo::default()
             .format(Format::R8G8B8A8_SRGB)
             .flags(ImageCreateFlags::empty())
-            .extent(
-                Extent3D::default()
-                    .depth(1)
-                    .width(hud_bar.get_width() as u32)
-                    .height(hud_bar.get_height() as u32),
-            )
+            .extent(Extent3D::default().depth(1).width(1920).height(1080))
             .usage(ImageUsageFlags::INPUT_ATTACHMENT | ImageUsageFlags::TRANSFER_DST)
             .tiling(ImageTiling::OPTIMAL)
             .samples(SampleCountFlags::TYPE_1)
@@ -79,15 +76,15 @@ fn main() {
 
     debug!(
         "The HUD bar has size {} x {}, total of {} pixels.",
-        hud_bar.get_width(),
-        hud_bar.get_height(),
-        hud_bar.get_pixel_array().len()
+        1920,
+        1080,
+        full_image.len()
     );
 
     graphics::render::composite_hud(
         &vk_context,
-        &hud_image.view,
-        hud_image.format,
+        &finished.view,
+        finished.format,
         transfer_complete_semaphore,
     );
 
@@ -769,3 +766,35 @@ fn load_gradient(ctxt: &VkContext) -> (DustImage, Semaphore) {
 //             .destroy_fence(swapchain_image_acq_fence, None);
 //     }
 // }
+
+fn embed_hud_in_huge_image(bmp: bitmap::Bitmap) -> Vec<[u8; 4]> {
+    let mut fake_screen = Vec::<[u8; 4]>::with_capacity(1920 * 1080);
+
+    for _ in 0..(1920 * 1080) {
+        fake_screen.push([0, 0, 0, 0]);
+    }
+
+    let bitmap = bmp.get_pixel_array();
+
+    let midpoint = 1920 / 2;
+    let bitmap_midpoint = bmp.get_width() / 2;
+
+    let left = midpoint - bitmap_midpoint;
+    let top = 1080 - bmp.get_height();
+
+    let mut current = 1920 * top + left;
+    let mut offset = 0;
+
+    while current < fake_screen.len() {
+        fake_screen.insert(current + offset, bitmap[offset]);
+
+        offset += 1;
+
+        if offset >= bmp.get_width() {
+            current += 1920;
+            offset = 0;
+        }
+    }
+
+    fake_screen
+}

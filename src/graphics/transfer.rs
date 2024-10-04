@@ -3,10 +3,10 @@ use ash::vk::{
     AccessFlags, AccessFlags2, Buffer, BufferCopy, BufferCreateFlags, BufferCreateInfo,
     BufferImageCopy, BufferMemoryBarrier, BufferUsageFlags, CommandBuffer, CommandBufferBeginInfo,
     CommandBufferUsageFlags, DependencyFlags, DependencyInfo, DeviceMemory, FenceCreateFlags,
-    FenceCreateInfo, Image, ImageAspectFlags, ImageCreateInfo, ImageLayout, ImageMemoryBarrier2,
-    ImageSubresourceRange, MemoryAllocateInfo, MemoryMapFlags, MemoryPropertyFlags,
-    PhysicalDeviceMemoryProperties, PipelineStageFlags, PipelineStageFlags2, Semaphore,
-    SharingMode, SubmitInfo, QUEUE_FAMILY_IGNORED,
+    FenceCreateInfo, Image, ImageAspectFlags, ImageCreateInfo, ImageLayout, ImageMemoryBarrier,
+    ImageMemoryBarrier2, ImageSubresourceRange, MemoryAllocateInfo, MemoryMapFlags,
+    MemoryPropertyFlags, PhysicalDeviceMemoryProperties, PipelineStageFlags, PipelineStageFlags2,
+    Semaphore, SharingMode, SubmitInfo, QUEUE_FAMILY_IGNORED,
 };
 use log::debug;
 
@@ -79,10 +79,11 @@ where
     // 2. Copy image via buffer_iamge_copy
     // 3. Transition image from transfer-optimal BACK to initial state.
     let from_transfer_dst_layout = ImageMemoryBarrier2::default()
+        // let from_transfer_dst_layout = ImageMemoryBarrier::default()
         .src_stage_mask(PipelineStageFlags2::TRANSFER)
         .src_access_mask(AccessFlags2::TRANSFER_WRITE)
         .src_queue_family_index(pools::get_transfer_queue_family())
-        // .dst_stage_mask(PipelineStageFlags2::FRAGMENT_SHADER)
+        // .dst_stage_mask(PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT)
         // .dst_access_mask(dst_mask)
         .dst_queue_family_index(target_queue_family)
         .old_layout(ImageLayout::TRANSFER_DST_OPTIMAL)
@@ -94,15 +95,15 @@ where
     let cmd_buffer = crate::graphics::pools::reserve_transfer_buffer(ctxt);
 
     let copy_into_dependency_info = DependencyInfo::default()
-        .memory_barriers(&[])
+        // .memory_barriers(&[])
         .image_memory_barriers(&transfer_barriers)
-        .buffer_memory_barriers(&[])
+        // .buffer_memory_barriers(&[])
         .dependency_flags(DependencyFlags::empty());
 
     let transfer_to_final_dependency_info = DependencyInfo::default()
-        .memory_barriers(&[])
+        // .memory_barriers(&[])
         .image_memory_barriers(&transfer_back_barriers)
-        .buffer_memory_barriers(&[])
+        // .buffer_memory_barriers(&[])
         .dependency_flags(DependencyFlags::empty());
 
     let copy_and_transition_complete_semaphore = util::create_binary_semaphore(ctxt);
@@ -136,6 +137,7 @@ where
             &regions,
         );
         ctxt.logical_device.cmd_pipeline_barrier2(
+            // ctxt.logical_device.cmd_pipeline_barrier(
             cmd_buffer,
             &transfer_to_final_dependency_info,
             // PipelineStageFlags::TRANSFER,
