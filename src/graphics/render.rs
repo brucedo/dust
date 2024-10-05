@@ -124,8 +124,10 @@ pub fn composite_hud(
             .framebuffer(framebuffer)
             .render_area(
                 Rect2D::default()
-                    .offset(Offset2D::default().x(501).y(989))
-                    .extent(Extent2D::default().width(918).height(91)),
+                    .offset(Offset2D::default().x(0).y(0))
+                    .extent(Extent2D::default().width(1920).height(1080)), // Rect2D::default()
+                                                                           //     .offset(Offset2D::default().x(501).y(989))
+                                                                           //     .extent(Extent2D::default().width(918).height(91)),
             );
         ctxt.logical_device.cmd_begin_render_pass(
             command_buffer,

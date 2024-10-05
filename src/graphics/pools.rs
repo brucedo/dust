@@ -11,6 +11,7 @@ use ash::vk::DescriptorSetLayout;
 use ash::vk::DescriptorType;
 use ash::vk::{CommandBuffer, CommandBufferAllocateInfo, CommandBufferLevel, CommandPool};
 use ash::Device;
+use log::debug;
 use log::error;
 
 use crate::setup::instance::VkContext;
@@ -87,6 +88,7 @@ pub fn destroy(ctxt: &VkContext) {
             DESCRIPTOR_SET_POOL.get(),
         ) {
             (Some(device), Some(graphics_pool), Some(transfer_pool), Some(descriptor_set_pool)) => {
+                debug!("The pools destructor has been invoked.");
                 device.destroy_descriptor_pool(*descriptor_set_pool, None);
                 device.destroy_command_pool(*graphics_pool, None);
                 device.destroy_command_pool(*transfer_pool, None);
@@ -162,6 +164,7 @@ pub fn unsafe_get_graphics_queue_family() -> u32 {
 }
 
 fn allocate_descriptor_set_pool(device: &Arc<Device>) -> DescriptorPool {
+    debug!("allocate_descriptor_set_pool invoked.");
     let descriptor_pool_sizes = [
         DescriptorPoolSize::default()
             .ty(DescriptorType::INPUT_ATTACHMENT)
@@ -196,6 +199,7 @@ fn allocate_descriptor_set_pool(device: &Arc<Device>) -> DescriptorPool {
 }
 
 pub fn allocate_image_descriptor_set(layouts: &[DescriptorSetLayout]) -> Vec<DescriptorSet> {
+    debug!("Image set descriptor allocation invoked.");
     match (LOGICAL_DEVICE.get(), DESCRIPTOR_SET_POOL.get()) {
         (Some(device), Some(pool)) => {
             let allocate_info = DescriptorSetAllocateInfo::default()
@@ -219,9 +223,7 @@ pub fn reset_image_descriptors() {
         (Some(device), Some(pool)) => {
             match unsafe { device.reset_descriptor_pool(*pool, DescriptorPoolResetFlags::empty()) }
             {
-                Ok(_) => {
-                    allocate_descriptor_set_pool(device);
-                }
+                Ok(_) => {}
                 Err(msg) => {
                     panic!("Failed to reset the descriptor pool: {:?}", msg);
                 }
@@ -230,5 +232,5 @@ pub fn reset_image_descriptors() {
         _ => {
             panic!("Either the devire or the descriptor pool is unset.  Cannot continue.");
         }
-    }
+    };
 }

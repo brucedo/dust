@@ -771,7 +771,7 @@ fn embed_hud_in_huge_image(bmp: bitmap::Bitmap) -> Vec<[u8; 4]> {
     let mut fake_screen = Vec::<[u8; 4]>::with_capacity(1920 * 1080);
 
     for _ in 0..(1920 * 1080) {
-        fake_screen.push([0, 0, 0, 0]);
+        fake_screen.push([0, 0, 0, 255]);
     }
 
     let bitmap = bmp.get_pixel_array();
@@ -782,17 +782,24 @@ fn embed_hud_in_huge_image(bmp: bitmap::Bitmap) -> Vec<[u8; 4]> {
     let left = midpoint - bitmap_midpoint;
     let top = 1080 - bmp.get_height();
 
-    let mut current = 1920 * top + left;
-    let mut offset = 0;
+    let mut embedded_row = top;
+    let mut embedded_col = left;
 
-    while current < fake_screen.len() {
-        fake_screen.insert(current + offset, bitmap[offset]);
+    debug!("Start index: ({}, {})", embedded_col, embedded_row);
 
-        offset += 1;
+    for pixel in bitmap.iter() {
+        fake_screen.insert(embedded_row * 1920 + embedded_col, *pixel);
 
-        if offset >= bmp.get_width() {
-            current += 1920;
-            offset = 0;
+        embedded_col += 1;
+
+        if embedded_col >= left + bmp.get_width() {
+            embedded_col = left;
+            embedded_row += 1;
+
+            debug!(
+                "Finished copying row and resetting to ({}, {})",
+                embedded_col, embedded_row
+            );
         }
     }
 

@@ -280,12 +280,13 @@ fn decode_windows_31_pixels(
         stride, color_depth, padding
     );
 
-    let mut unpacked_pixel_array = Vec::<[u8; 4]>::with_capacity(stride * rows * 4);
+    // let mut unpacked_pixel_array = Vec::<[u8; 4]>::with_capacity(stride * rows * 4);
+    let mut unpacked_pixel_array = vec![[0, 0, 0, 0]; stride * rows];
 
     let mut current_byte = 0;
 
-    for _row in 0..rows {
-        for _pixel in 0..stride {
+    for row in 0..rows {
+        for pixel in 0..stride {
             let next_pixel: &[u8] = &pixel_array[current_byte..(current_byte + bytes_per_color)];
             let pixel_color = translate_color(
                 next_pixel,
@@ -293,9 +294,11 @@ fn decode_windows_31_pixels(
                 &color_block.color_table,
             )?;
             if fill_direction_up {
-                unpacked_pixel_array.insert(0, pixel_color);
+                unpacked_pixel_array[(rows - 1 - row) * stride + pixel] = pixel_color;
+                // unpacked_pixel_array.insert(0, pixel_color);
             } else {
-                unpacked_pixel_array.push(pixel_color);
+                unpacked_pixel_array[row * stride + pixel] = pixel_color;
+                // unpacked_pixel_array.push(pixel_color);
             }
 
             current_byte += bytes_per_color;

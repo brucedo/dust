@@ -539,6 +539,14 @@ pub fn image_transfer_family_release(
         None => image_barrier,
     };
 
+    debug!(
+        "Image layout transition from {:?} to {:?}; queue release from old {} to new {}",
+        image_barrier.old_layout,
+        image_barrier.new_layout,
+        image_barrier.src_queue_family_index,
+        image_barrier.dst_queue_family_index
+    );
+
     let release_barriers = [image_barrier];
 
     let dependency_info = DependencyInfo::default().image_memory_barriers(&release_barriers);
@@ -564,14 +572,24 @@ pub fn image_transfer_family_release(
     let submits = [submit_info];
 
     unsafe {
-        ctxt.logical_device
-            .begin_command_buffer(buffer, &begin_info);
+        if let Err(msg) = ctxt
+            .logical_device
+            .begin_command_buffer(buffer, &begin_info)
+        {
+            panic!("Unable to begin the command buffer: {:?}", msg);
+        }
         ctxt.logical_device
             .cmd_pipeline_barrier2(buffer, &dependency_info);
-        ctxt.logical_device.end_command_buffer(buffer);
+        if let Err(msg) = ctxt.logical_device.end_command_buffer(buffer) {
+            panic!("Unable to end command buffer: {:?}", msg);
+        }
 
-        ctxt.logical_device
-            .queue_submit(queue, &submits, released_fence);
+        if let Err(msg) = ctxt
+            .logical_device
+            .queue_submit(queue, &submits, released_fence)
+        {
+            panic!("Unable to submit command buffer: {:?}", msg);
+        }
     }
 
     (release_semaphore[0], released_fence)
@@ -604,6 +622,14 @@ pub fn image_transfer_family_acquire(
         None => image_barrier,
     };
 
+    debug!(
+        "Image layout transition from {:?} to {:?}; queue acquire from old {} to new {}",
+        image_barrier.old_layout,
+        image_barrier.new_layout,
+        image_barrier.src_queue_family_index,
+        image_barrier.dst_queue_family_index
+    );
+
     let release_barriers = [image_barrier];
 
     let dependency_info = DependencyInfo::default().image_memory_barriers(&release_barriers);
@@ -612,9 +638,9 @@ pub fn image_transfer_family_acquire(
     let acquired_fence = util::create_fence(ctxt);
     let available_semaphore = [available];
 
-    let queue = ctxt.transfer_queue;
+    let queue = ctxt.graphics_queue;
 
-    let buffer = pools::reserve_transfer_buffer(ctxt);
+    let buffer = pools::reserve_graphics_buffer(ctxt);
     let buffers = [buffer];
 
     let begin_info =
@@ -629,14 +655,30 @@ pub fn image_transfer_family_acquire(
     let submits = [submit_info];
 
     unsafe {
-        ctxt.logical_device
-            .begin_command_buffer(buffer, &begin_info);
+        if let Err(msg) = ctxt
+            .logical_device
+            .begin_command_buffer(buffer, &begin_info)
+        {
+            panic!(
+                "Unable to begin command buffer for queue acquire: {:?}",
+                msg
+            );
+        }
         ctxt.logical_device
             .cmd_pipeline_barrier2(buffer, &dependency_info);
-        ctxt.logical_device.end_command_buffer(buffer);
+        if let Err(msg) = ctxt.logical_device.end_command_buffer(buffer) {
+            panic!("Unable to end command buffer for queue acquire: {:?}", msg);
+        }
 
-        ctxt.logical_device
-            .queue_submit(queue, &submits, acquired_fence);
+        if let Err(msg) = ctxt
+            .logical_device
+            .queue_submit(queue, &submits, acquired_fence)
+        {
+            panic!(
+                "Unable to submit command buffer for queue acquire: {:?}",
+                msg
+            );
+        }
     }
 
     (release_semaphore[0], acquired_fence)
