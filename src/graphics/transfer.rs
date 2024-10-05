@@ -2,11 +2,11 @@ use crate::dust_errors::DustError;
 use ash::vk::{
     AccessFlags, AccessFlags2, Buffer, BufferCopy, BufferCreateFlags, BufferCreateInfo,
     BufferImageCopy, BufferMemoryBarrier, BufferUsageFlags, CommandBuffer, CommandBufferBeginInfo,
-    CommandBufferUsageFlags, DependencyFlags, DependencyInfo, DeviceMemory, FenceCreateFlags,
-    FenceCreateInfo, Image, ImageAspectFlags, ImageCreateInfo, ImageLayout, ImageMemoryBarrier,
-    ImageMemoryBarrier2, ImageSubresourceRange, MemoryAllocateInfo, MemoryMapFlags,
-    MemoryPropertyFlags, PhysicalDeviceMemoryProperties, PipelineStageFlags, PipelineStageFlags2,
-    Semaphore, SharingMode, SubmitInfo, QUEUE_FAMILY_IGNORED,
+    CommandBufferUsageFlags, DependencyFlags, DependencyInfo, DeviceMemory, Fence,
+    FenceCreateFlags, FenceCreateInfo, Image, ImageAspectFlags, ImageCreateInfo, ImageLayout,
+    ImageMemoryBarrier, ImageMemoryBarrier2, ImageSubresourceRange, MemoryAllocateInfo,
+    MemoryMapFlags, MemoryPropertyFlags, PhysicalDeviceMemoryProperties, PipelineStageFlags,
+    PipelineStageFlags2, Semaphore, SharingMode, SubmitInfo, QUEUE_FAMILY_IGNORED,
 };
 use log::debug;
 
@@ -62,13 +62,13 @@ where
         .aspect_mask(ImageAspectFlags::COLOR);
 
     let to_transfer_dst_layout = ImageMemoryBarrier2::default()
-        // .src_stage_mask(PipelineStageFlags2::TOP_OF_PIPE)
-        // .src_access_mask(AccessFlags2::NONE)
-        .src_queue_family_index(QUEUE_FAMILY_IGNORED)
-        // .dst_queue_family_index(pools::get_transfer_queue_family())
-        .dst_stage_mask(PipelineStageFlags2::TRANSFER)
-        .dst_access_mask(AccessFlags2::TRANSFER_WRITE)
-        .dst_queue_family_index(QUEUE_FAMILY_IGNORED)
+        //     // .src_stage_mask(PipelineStageFlags2::TOP_OF_PIPE)
+        //     // .src_access_mask(AccessFlags2::NONE)
+        //     // .src_queue_family_index(QUEUE_FAMILY_IGNORED)
+        //     // .dst_queue_family_index(pools::get_transfer_queue_family())
+        //     .dst_stage_mask(PipelineStageFlags2::TRANSFER)
+        //     .dst_access_mask(AccessFlags2::TRANSFER_WRITE)
+        //     .dst_queue_family_index(QUEUE_FAMILY_IGNORED)
         .old_layout(ImageLayout::UNDEFINED)
         .new_layout(ImageLayout::TRANSFER_DST_OPTIMAL)
         .image(image_target)
@@ -82,12 +82,12 @@ where
         // let from_transfer_dst_layout = ImageMemoryBarrier::default()
         .src_stage_mask(PipelineStageFlags2::TRANSFER)
         .src_access_mask(AccessFlags2::TRANSFER_WRITE)
-        .src_queue_family_index(pools::get_transfer_queue_family())
+        .src_queue_family_index(QUEUE_FAMILY_IGNORED)
         // .dst_stage_mask(PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT)
         // .dst_access_mask(dst_mask)
-        .dst_queue_family_index(target_queue_family)
-        .old_layout(ImageLayout::TRANSFER_DST_OPTIMAL)
-        .new_layout(target_layout)
+        .dst_queue_family_index(QUEUE_FAMILY_IGNORED)
+        // .old_layout(ImageLayout::)
+        // .new_layout()
         .image(image_target)
         .subresource_range(transfer_subresource_range);
     let transfer_back_barriers = vec![from_transfer_dst_layout];
@@ -159,10 +159,44 @@ where
     let signal_semaphores = [copy_and_transition_complete_semaphore];
     run_commands_blocking(ctxt, &buffers, &signal_semaphores);
 
+    let (released_semaphore, released_fence) = image_transfer_family_release(
+        ctxt,
+        image_target,
+        &transfer_subresource_range,
+        pools::get_graphics_queue_family(),
+        signal_semaphores[0],
+        Some((ImageLayout::TRANSFER_DST_OPTIMAL, target_layout)),
+    );
+
+    let (acquired_semaphore, acquired_fence) = image_transfer_family_acquire(
+        ctxt,
+        image_target,
+        &transfer_subresource_range,
+        pools::get_transfer_queue_family(),
+        released_semaphore,
+        Some((ImageLayout::TRANSFER_DST_OPTIMAL, target_layout)),
+    );
+
+    let ownership_transfer_fences = [released_fence, acquired_fence];
+    unsafe {
+        if let Err(msg) =
+            ctxt.logical_device
+                .wait_for_fences(&ownership_transfer_fences, true, 10000000000)
+        {
+            panic!("Waiting for the image release/acquire failed: {:?}", msg);
+        }
+    }
+
     // cleanup
     unsafe {
         ctxt.logical_device.destroy_buffer(transfer_buffer, None);
         ctxt.logical_device.free_memory(memory_handle, None);
+        ctxt.logical_device
+            .destroy_semaphore(copy_and_transition_complete_semaphore, None);
+        ctxt.logical_device
+            .destroy_semaphore(released_semaphore, None);
+        ctxt.logical_device.destroy_fence(released_fence, None);
+        ctxt.logical_device.destroy_fence(acquired_fence, None);
     }
 
     (
@@ -172,7 +206,7 @@ where
             device_memory,
             ctxt.logical_device.clone(),
         ),
-        copy_and_transition_complete_semaphore,
+        acquired_semaphore,
     )
 }
 
@@ -477,6 +511,148 @@ pub fn match_memory_type(
     }
     Err(DustError::NoMatchingMemoryType)
 }
+
+pub fn image_transfer_family_release(
+    ctxt: &VkContext,
+    image: Image,
+    subresource: &ImageSubresourceRange,
+    new_queue_family: u32,
+    available: Semaphore,
+    from_layout: Option<(ImageLayout, ImageLayout)>,
+) -> (Semaphore, Fence) {
+    debug!(
+        "Releasing image with aspect mask of {:?}.",
+        subresource.aspect_mask
+    );
+    let image_barrier = ImageMemoryBarrier2::default()
+        .src_queue_family_index(pools::get_transfer_queue_family())
+        .dst_queue_family_index(new_queue_family)
+        .src_access_mask(AccessFlags2::TRANSFER_WRITE)
+        .src_stage_mask(PipelineStageFlags2::COPY)
+        .subresource_range(*subresource)
+        .image(image);
+
+    let image_barrier = match from_layout {
+        Some((from_layout, to_layout)) => {
+            image_barrier.old_layout(from_layout).new_layout(to_layout)
+        }
+        None => image_barrier,
+    };
+
+    let release_barriers = [image_barrier];
+
+    let dependency_info = DependencyInfo::default().image_memory_barriers(&release_barriers);
+
+    let release_semaphore = [util::create_binary_semaphore(ctxt)];
+    let released_fence = util::create_fence(ctxt);
+    let available_semaphore = [available];
+
+    let queue = ctxt.transfer_queue;
+
+    let buffer = pools::reserve_transfer_buffer(ctxt);
+    let buffers = [buffer];
+
+    let begin_info =
+        CommandBufferBeginInfo::default().flags(CommandBufferUsageFlags::ONE_TIME_SUBMIT);
+
+    let submit_info = SubmitInfo::default()
+        .signal_semaphores(&release_semaphore)
+        .wait_semaphores(&available_semaphore)
+        .wait_dst_stage_mask(&[PipelineStageFlags::TRANSFER])
+        .command_buffers(&buffers);
+
+    let submits = [submit_info];
+
+    unsafe {
+        ctxt.logical_device
+            .begin_command_buffer(buffer, &begin_info);
+        ctxt.logical_device
+            .cmd_pipeline_barrier2(buffer, &dependency_info);
+        ctxt.logical_device.end_command_buffer(buffer);
+
+        ctxt.logical_device
+            .queue_submit(queue, &submits, released_fence);
+    }
+
+    (release_semaphore[0], released_fence)
+}
+
+pub fn image_transfer_family_acquire(
+    ctxt: &VkContext,
+    image: Image,
+    subresource: &ImageSubresourceRange,
+    previous_queue_family: u32,
+    available: Semaphore,
+    to_layout: Option<(ImageLayout, ImageLayout)>,
+) -> (Semaphore, Fence) {
+    debug!(
+        "Acquiring image with aspect mask: {:?}",
+        subresource.aspect_mask
+    );
+    let image_barrier = ImageMemoryBarrier2::default()
+        .src_queue_family_index(previous_queue_family)
+        .dst_queue_family_index(pools::get_graphics_queue_family())
+        .src_access_mask(AccessFlags2::TRANSFER_WRITE)
+        .src_stage_mask(PipelineStageFlags2::COPY)
+        .subresource_range(*subresource)
+        .image(image);
+
+    let image_barrier = match to_layout {
+        Some((from_layout, to_layout)) => {
+            image_barrier.old_layout(from_layout).new_layout(to_layout)
+        }
+        None => image_barrier,
+    };
+
+    let release_barriers = [image_barrier];
+
+    let dependency_info = DependencyInfo::default().image_memory_barriers(&release_barriers);
+
+    let release_semaphore = [util::create_binary_semaphore(ctxt)];
+    let acquired_fence = util::create_fence(ctxt);
+    let available_semaphore = [available];
+
+    let queue = ctxt.transfer_queue;
+
+    let buffer = pools::reserve_transfer_buffer(ctxt);
+    let buffers = [buffer];
+
+    let begin_info =
+        CommandBufferBeginInfo::default().flags(CommandBufferUsageFlags::ONE_TIME_SUBMIT);
+
+    let submit_info = SubmitInfo::default()
+        .signal_semaphores(&release_semaphore)
+        .wait_semaphores(&available_semaphore)
+        .wait_dst_stage_mask(&[PipelineStageFlags::TRANSFER])
+        .command_buffers(&buffers);
+
+    let submits = [submit_info];
+
+    unsafe {
+        ctxt.logical_device
+            .begin_command_buffer(buffer, &begin_info);
+        ctxt.logical_device
+            .cmd_pipeline_barrier2(buffer, &dependency_info);
+        ctxt.logical_device.end_command_buffer(buffer);
+
+        ctxt.logical_device
+            .queue_submit(queue, &submits, acquired_fence);
+    }
+
+    (release_semaphore[0], acquired_fence)
+}
+
+// pub fn image_graphics_family_release(
+//     new_queue_family: u32,
+//     layout_change: Option<ImageLayout>,
+// ) -> Semaphore {
+// }
+//
+// pub fn image_graphics_family_acquire(
+//     new_queue_family: u32,
+//     layout_change: Option<ImageLayout>,
+// ) -> Semaphore {
+// }
 
 fn map_access_flags(layout: ImageLayout) -> AccessFlags2 {
     match layout {
