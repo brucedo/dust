@@ -1,5 +1,6 @@
 pub mod bitmap;
 pub mod image;
+pub mod math_types;
 pub mod pools;
 pub mod render;
 pub mod shaders;
