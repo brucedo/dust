@@ -1,4 +1,5 @@
 pub mod bitmap;
+pub mod hud;
 pub mod image;
 pub mod math_types;
 pub mod pools;

@@ -31,7 +31,6 @@ pub fn composite_hud(
     view_fmt: Format,
     image_ready: Semaphore,
 ) {
-    // Just to satisfy a lifetime requirement later on...
     // Steps to win:
     // 1.  Get swapchain image.
     //     a.  Create a swapchain-drawing-on-this-image-complete Semaphore
@@ -42,148 +41,53 @@ pub fn composite_hud(
     let (index, swapchain_image, _suboptimal) =
         swapchain::next_swapchain_image(swapchain_acquisition_semaphore, Fence::null());
     let image_ready_array = vec![image_ready, swapchain_acquisition_semaphore];
-    // 2.  Build DescriptorSetLayout
-    //     a.  Set the type: INPUT_ATTACHMENT
-    //     b.  This is for a single binding, and a single descriptor within the binding.
-    //     c.  Ensure the binding number is 0.
-    let descriptor_set_layouts = [create_descriptor_set_layout(ctxt)];
-    // 3.  Get the DescriptorSet.
-    //     a.  There's not much more to this, other than making sure the DescriptorSet and the
-    //         DescriptorSetLayout are used in the correct places.
-    let descriptor_set = pools::allocate_image_descriptor_set(&descriptor_set_layouts);
-    let hud_descriptor_set = descriptor_set.first().unwrap();
-    let descriptor_sets = [*hud_descriptor_set];
-    load_hud_descriptor_set(ctxt, *hud_descriptor_set, *hud_image);
-    // 4.  Build RenderPass
+    // 2.  Build RenderPass.  This render pass has two subpasses: HUD subpass and world
+    //    render subpass.  World render subpass would have a lot more data in it than HUD
+    //    subpass but we aren't doing anything there yet.
+    //    The HUD subpass will need a dedicated pipeline with the sampler DescriptorSetLayouts,
+    //    ImageViews and SampledVertex types.  These should be pre-loaded before the
+    //    render pass begins, and references to them kept.
     //     a.  Construct the AttachmentReferences
     //     b.  Construct the AttachmentDescriptions
-    //     c.  Construct the render subpass
-    let render_pass = make_render_pass(ctxt, view_fmt);
+    //     c.  Construct the HUD subpass.
+    //     d.  Construct the world-render subpass
     // 5.  Build Framebuffer.
     //     a.  Set the attachments in order swapchain, hud
     //     b.  Set the width and height of the framebuffer
     //     c.  Set the render pass
-    let attachments = vec![*swapchain_image, *hud_image];
-    let framebuffer = make_framebuffer(ctxt, render_pass, &attachments);
+    // 2.  Build DescriptorSetLayout
+    //     a.  Set the type: INPUT_ATTACHMENT
+    //     b.  This is for a single binding, and a single descriptor within the binding.
+    //     c.  Ensure the binding number is 0.
+    // 3.  Get the DescriptorSet.
+    //     a.  There's not much more to this, other than making sure the DescriptorSet and the
+    //         DescriptorSetLayout are used in the correct places.
     // 6.  Build PipelineLayout.
     //     a.  Associate the DescriptorSetLayouts with the PipelineLayoutCreateInfo
     //     b.  That's actually about it.
-    let pipeline_layout = create_pipeline_layout(ctxt, Some(&descriptor_set_layouts), None);
     // 7.  Build GraphicsPipeline.
     //     a.  There's a lot here.
     //     b.  Shader stage, input assembly, vertex, viewport, rasterization state,
     //         multisample state, and probably a couple of others I am forgetting.
     //     c.  Pipeline must be hooked to pipeline layout
     //     d.  Pipeline I think must be hooked to render pass and/or subpass.
-    let graphics_pipeline = make_pipeline(ctxt, render_pass, pipeline_layout);
     // 8.  Begin recording command buffer.
     //     a.  Might be wise to reset either the entire pool, or at the least the buffer.
-    let command_buffer = pools::reserve_graphics_buffer(ctxt);
 
-    if let Err(msg) = unsafe {
-        ctxt.logical_device
-            .reset_command_buffer(command_buffer, CommandBufferResetFlags::empty())
-    } {
-        panic!("Could not reset the command buffer: {:?}", msg);
-    }
-    debug!(
-        "Just for the absolute shit of it - what's the graphics queue? {}",
-        pools::get_graphics_queue_family()
-    );
+    // 11. Bind DescriptorSets to the command command_buffer
+    //     a.  for this example, there will be set 0, binding 0, single element.
+    // 9.  Begin render pass.
+    // 10. Bind Pipeline to command buffer.
+    // 11.5  We may also need to put a pipeline barrier in place specifically to force
+    //       the fragment operations to wait for the HUD image semaphore and as well the
+    //       swapchain image acquisition.
+    // 12. Issue cmdDraw with no vertices
+    //     b.  Here's really hoping this works...
+    // 13. End render pass
 
-    unsafe {
-        let command_buffer_begin_info =
-            CommandBufferBeginInfo::default().flags(CommandBufferUsageFlags::ONE_TIME_SUBMIT);
-        if let Err(msg) = ctxt
-            .logical_device
-            .begin_command_buffer(command_buffer, &command_buffer_begin_info)
-        {
-            panic!("The command buffer begin record command failed: {:?}", msg);
-        }
-
-        // 11. Bind DescriptorSets to the command command_buffer
-        //     a.  for this example, there will be set 0, binding 0, single element.
-        ctxt.logical_device.cmd_bind_descriptor_sets(
-            command_buffer,
-            PipelineBindPoint::GRAPHICS,
-            pipeline_layout,
-            0,
-            &descriptor_sets,
-            &[],
-        );
-
-        // 9.  Begin render pass.
-        let clear_value = ClearColorValue {
-            int32: [0, 0, 0, 0],
-        };
-        let clear_values = [ClearValue { color: clear_value }];
-        let render_pass_info = RenderPassBeginInfo::default()
-            .clear_values(&clear_values)
-            .render_pass(render_pass)
-            .framebuffer(framebuffer)
-            .render_area(
-                Rect2D::default()
-                    .offset(Offset2D::default().x(0).y(0))
-                    .extent(Extent2D::default().width(1920).height(1080)), // Rect2D::default()
-                                                                           //     .offset(Offset2D::default().x(501).y(989))
-                                                                           //     .extent(Extent2D::default().width(918).height(91)),
-            );
-        ctxt.logical_device.cmd_begin_render_pass(
-            command_buffer,
-            &render_pass_info,
-            SubpassContents::INLINE,
-        );
-
-        // 10. Bind Pipeline to command buffer.
-        ctxt.logical_device.cmd_bind_pipeline(
-            command_buffer,
-            PipelineBindPoint::GRAPHICS,
-            graphics_pipeline,
-        );
-
-        // 11.5  We may also need to put a pipeline barrier in place specifically to force
-        //       the fragment operations to wait for the HUD image semaphore and as well the
-        //       swapchain image acquisition.
-        // 12. Issue cmdDraw with no vertices
-        //     b.  Here's really hoping this works...
-        ctxt.logical_device.cmd_draw(command_buffer, 0, 1, 0, 0);
-        // 13. End render pass
-        ctxt.logical_device.cmd_end_render_pass(command_buffer);
-
-        // 14. End command buffer recording.
-        if let Err(msg) = ctxt.logical_device.end_command_buffer(command_buffer) {
-            panic!("Unable to end command buffer: {:?}", msg);
-        }
-
-        // 15. Issue command buffer on the Graphics queue
-        let command_buffers = [command_buffer];
-        let submit_info = SubmitInfo::default()
-            .wait_semaphores(&image_ready_array)
-            .wait_dst_stage_mask(&[
-                PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-                PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-            ])
-            .signal_semaphores(&render_complete_semaphore)
-            .command_buffers(&command_buffers);
-
-        debug!(
-            "What is the submit info semaphore count?!?!?! {}",
-            submit_info.wait_semaphore_count
-        );
-
-        debug!(
-            "What is the fucking number of things in image_ready_array?!!?!?!! {}",
-            image_ready_array.len()
-        );
-
-        if let Err(msg) = ctxt.logical_device.queue_submit(
-            ctxt.graphics_queue,
-            &[submit_info],
-            render_complete_fence,
-        ) {
-            panic!("The queue submit attempt failed: {:?}", msg);
-        }
-    }
+    // 14. End command buffer recording.
+    // 15. Issue command buffer on the Graphics queue
+    // }
 
     // 16. Present the swapchain image to the presentation engine.
     //     a.  This should wait for the cmomand buffer semaphore to signal before issuing.

@@ -216,22 +216,31 @@ impl Vulkanic for F64Vertex4 {
     }
 }
 
-pub struct SampledVertex3 {
-    texture_coord: F32Vertex2,
-    vertex: F32Vertex3,
-}
-
-impl Vulkanic for SampledVertex3 {
-    fn copy_into_vk_buffer(&self, buffer: &mut [u8], start: usize) -> usize {
-        let texture_size = self.texture_coord.copy_into_vk_buffer(buffer, start);
-        let vertex_size = self
-            .vertex
-            .copy_into_vk_buffer(buffer, start + size_of_val(&self.texture_coord.vertex));
-
-        texture_size + vertex_size
+pub mod sampled_vertex_3 {
+    pub struct SampledVertex3 {
+        texture_coord: super::F32Vertex2,
+        vertex: super::F32Vertex3,
     }
-    fn copy_into_vk_vec(&self, buffer: &mut Vec<u8>) {
-        self.texture_coord.copy_into_vk_vec(buffer);
-        self.vertex.copy_into_vk_vec(buffer);
+
+    impl super::Vulkanic for SampledVertex3 {
+        fn copy_into_vk_buffer(&self, buffer: &mut [u8], start: usize) -> usize {
+            let texture_size = self.texture_coord.copy_into_vk_buffer(buffer, start);
+            let vertex_size = self
+                .vertex
+                .copy_into_vk_buffer(buffer, start + size_of_val(&self.texture_coord.vertex));
+
+            texture_size + vertex_size
+        }
+        fn copy_into_vk_vec(&self, buffer: &mut Vec<u8>) {
+            self.texture_coord.copy_into_vk_vec(buffer);
+            self.vertex.copy_into_vk_vec(buffer);
+        }
+    }
+
+    pub fn new(texture_coord: [f32; 2], vertex: [f32; 3]) -> SampledVertex3 {
+        SampledVertex3 {
+            texture_coord,
+            vertex,
+        }
     }
 }

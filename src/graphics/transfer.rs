@@ -1,12 +1,13 @@
 use crate::dust_errors::DustError;
 use ash::vk::{
     AccessFlags, AccessFlags2, Buffer, BufferCopy, BufferCreateFlags, BufferCreateInfo,
-    BufferImageCopy, BufferMemoryBarrier, BufferUsageFlags, CommandBuffer, CommandBufferBeginInfo,
-    CommandBufferUsageFlags, DependencyFlags, DependencyInfo, DeviceMemory, Fence,
-    FenceCreateFlags, FenceCreateInfo, Image, ImageAspectFlags, ImageCreateInfo, ImageLayout,
-    ImageMemoryBarrier, ImageMemoryBarrier2, ImageSubresourceRange, MemoryAllocateInfo,
-    MemoryMapFlags, MemoryPropertyFlags, PhysicalDeviceMemoryProperties, PipelineStageFlags,
-    PipelineStageFlags2, Semaphore, SharingMode, SubmitInfo, QUEUE_FAMILY_IGNORED,
+    BufferImageCopy, BufferMemoryBarrier, BufferMemoryBarrier2, BufferUsageFlags, CommandBuffer,
+    CommandBufferBeginInfo, CommandBufferResetFlags, CommandBufferUsageFlags, DependencyFlags,
+    DependencyInfo, DeviceMemory, Fence, FenceCreateFlags, FenceCreateInfo, Image,
+    ImageAspectFlags, ImageCreateInfo, ImageLayout, ImageMemoryBarrier, ImageMemoryBarrier2,
+    ImageSubresourceRange, MemoryAllocateInfo, MemoryMapFlags, MemoryPropertyFlags,
+    PhysicalDeviceMemoryProperties, PipelineStageFlags, PipelineStageFlags2, Semaphore,
+    SemaphoreSubmitInfo, SharingMode, SubmitInfo, SubmitInfo2, QUEUE_FAMILY_IGNORED,
 };
 use log::debug;
 
@@ -210,7 +211,12 @@ where
     )
 }
 
-pub fn copy_to_buffer<T>(data: &[T], ctxt: &VkContext, usage: BufferUsageFlags) -> Buffer
+pub fn copy_to_buffer<T>(
+    data: &[T],
+    ctxt: &VkContext,
+    usage: BufferUsageFlags,
+    target_queue_family: u32,
+) -> (Buffer, Semaphore)
 where
     T: Sized + Copy + Clone,
 {
@@ -231,14 +237,30 @@ where
 
     let begin_info =
         CommandBufferBeginInfo::default().flags(CommandBufferUsageFlags::ONE_TIME_SUBMIT);
-    let buffer_write_barrier = BufferMemoryBarrier::default()
-        .src_access_mask(AccessFlags::TRANSFER_WRITE)
-        .dst_access_mask(AccessFlags::MEMORY_WRITE | AccessFlags::MEMORY_READ)
-        .dst_queue_family_index(QUEUE_FAMILY_IGNORED)
-        .src_queue_family_index(QUEUE_FAMILY_IGNORED)
-        .size(size_in_bytes)
-        .buffer(perm_buffer)
-        .offset(0);
+
+    let release_barrier = [BufferMemoryBarrier2::default()
+        .src_stage_mask(PipelineStageFlags2::TRANSFER)
+        .src_queue_family_index(pools::get_transfer_queue_family())
+        .dst_queue_family_index(target_queue_family)
+        .src_access_mask(AccessFlags2::TRANSFER_WRITE)];
+
+    let release_dependency = DependencyInfo::default().buffer_memory_barriers(&release_barrier);
+
+    let acquire_barrier = [BufferMemoryBarrier2::default()
+        .dst_stage_mask(PipelineStageFlags2::ALL_COMMANDS)
+        .dst_access_mask(AccessFlags2::MEMORY_READ_KHR)
+        .src_queue_family_index(pools::get_transfer_queue_family())
+        .dst_queue_family_index(target_queue_family)];
+
+    let acquire_dependency = DependencyInfo::default().buffer_memory_barriers(&acquire_barrier);
+
+    // let buffer_write_barrier = BufferMemoryBarrier::default()
+    //     .src_access_mask(AccessFlags::TRANSFER_WRITE)
+    //     .dst_queue_family_index(QUEUE_FAMILY_IGNORED)
+    //     .src_queue_family_index(QUEUE_FAMILY_IGNORED)
+    //     .size(size_in_bytes)
+    //     .buffer(perm_buffer)
+    //     .offset(0);
 
     unsafe {
         match ctxt
@@ -258,21 +280,11 @@ where
             perm_buffer,
             &copy_region,
         );
-        ctxt.logical_device.cmd_pipeline_barrier(
-            // *cmd_buffer.first().unwrap(),
-            cmd_buffer,
-            PipelineStageFlags::TRANSFER,
-            PipelineStageFlags::ALL_COMMANDS,
-            DependencyFlags::empty(),
-            &[],
-            &[buffer_write_barrier],
-            &[],
-        );
-        match ctxt
-            .logical_device
-            // .end_command_buffer(*cmd_buffer.first().unwrap())
-            .end_command_buffer(cmd_buffer)
-        {
+
+        ctxt.logical_device
+            .cmd_pipeline_barrier2(cmd_buffer, &release_dependency);
+
+        match ctxt.logical_device.end_command_buffer(cmd_buffer) {
             Ok(_) => {}
             Err(msg) => {
                 panic!("Ending command buffer for transfer failed: {:?}", msg);
@@ -280,16 +292,73 @@ where
         }
     }
 
-    // let commands_to_run = &cmd_buffer[0..1];
+    let mut submit_buffers = [cmd_buffer];
+    let signal_release_complete = [util::create_binary_semaphore(ctxt)];
+    let fence_release_and_copy_complete = util::create_fence(ctxt);
+    let copy_and_release_submit = SubmitInfo::default()
+        .signal_semaphores(&signal_release_complete)
+        .command_buffers(&submit_buffers);
+    unsafe {
+        ctxt.logical_device.queue_submit(
+            ctxt.transfer_queue,
+            &[copy_and_release_submit],
+            fence_release_and_copy_complete,
+        )
+    };
 
-    run_commands_blocking(ctxt, &[cmd_buffer], &[]);
+    let (queue, target_queue_cmd_buffer) =
+        if target_queue_family == pools::get_transfer_queue_family() {
+            (ctxt.transfer_queue, pools::reserve_transfer_buffer(ctxt))
+        } else {
+            (ctxt.graphics_queue, pools::reserve_graphics_buffer(ctxt))
+        };
+
+    let signal_acquire_complete = [util::create_binary_semaphore(ctxt)];
+
+    submit_buffers = [target_queue_cmd_buffer];
+    let acquire_submit = [SubmitInfo::default()
+        .wait_semaphores(&signal_release_complete)
+        .wait_dst_stage_mask(&[PipelineStageFlags::TRANSFER])
+        .signal_semaphores(&signal_acquire_complete)
+        .command_buffers(&submit_buffers)];
 
     unsafe {
+        if let Err(msg) = ctxt
+            .logical_device
+            .begin_command_buffer(target_queue_cmd_buffer, &begin_info)
+        {
+            panic!(
+                "Could not begin new recording of command buffer for release: {:?}",
+                msg
+            );
+        }
+
+        ctxt.logical_device
+            .cmd_pipeline_barrier2(target_queue_cmd_buffer, &release_dependency);
+
+        if let Err(msg) = ctxt.logical_device.end_command_buffer(cmd_buffer) {
+            panic!(
+                "Could not end recording of command buffer for release: {:?}",
+                msg
+            );
+        }
+
+        ctxt.logical_device
+            .queue_submit(queue, &acquire_submit, Fence::null());
+    }
+
+    unsafe {
+        ctxt.logical_device
+            .wait_for_fences(&[fence_release_and_copy_complete], true, 10000000000);
         ctxt.logical_device.destroy_buffer(transfer_buffer, None);
         ctxt.logical_device.free_memory(mem_handle, None);
+        // ctxt.logical_device
+        //     .destroy_semaphore(signal_transfer_complete, None);
+        ctxt.logical_device
+            .destroy_semaphore(signal_release_complete[0], None);
         // ctxt.logical_device.destroy_fence(fence, None);
     }
-    perm_buffer
+    (perm_buffer, signal_acquire_complete[0])
 }
 
 fn run_commands_blocking(
