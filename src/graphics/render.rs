@@ -108,24 +108,24 @@ pub fn composite_hud(
         panic!("Waiting for the damn fence failed: {:?}", msg);
     }
 
-    unsafe {
-        ctxt.logical_device
-            .destroy_fence(render_complete_fence, None);
-        ctxt.logical_device
-            .destroy_semaphore(swapchain_acquisition_semaphore, None);
-        ctxt.logical_device
-            .destroy_semaphore(render_complete_semaphore[0], None);
-        ctxt.logical_device.destroy_semaphore(image_ready, None);
-        ctxt.logical_device.destroy_framebuffer(framebuffer, None);
-        ctxt.logical_device.destroy_render_pass(render_pass, None);
-        ctxt.logical_device
-            .destroy_pipeline_layout(pipeline_layout, None);
-        ctxt.logical_device
-            .destroy_pipeline(graphics_pipeline, None);
-        ctxt.logical_device
-            .destroy_descriptor_set_layout(descriptor_set_layouts[0], None);
-        pools::reset_image_descriptors();
-    }
+    // unsafe {
+    //     ctxt.logical_device
+    //         .destroy_fence(render_complete_fence, None);
+    //     ctxt.logical_device
+    //         .destroy_semaphore(swapchain_acquisition_semaphore, None);
+    //     ctxt.logical_device
+    //         .destroy_semaphore(render_complete_semaphore[0], None);
+    //     ctxt.logical_device.destroy_semaphore(image_ready, None);
+    //     ctxt.logical_device.destroy_framebuffer(framebuffer, None);
+    //     ctxt.logical_device.destroy_render_pass(render_pass, None);
+    //     ctxt.logical_device
+    //         .destroy_pipeline_layout(pipeline_layout, None);
+    //     ctxt.logical_device
+    //         .destroy_pipeline(graphics_pipeline, None);
+    //     ctxt.logical_device
+    //         .destroy_descriptor_set_layout(descriptor_set_layouts[0], None);
+    //     pools::reset_image_descriptors();
+    // }
 }
 
 pub fn old_composite_test(

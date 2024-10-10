@@ -1,56 +1,69 @@
 use std::f64;
 
-trait Vulkanic {
+pub trait Vulkanic {
     fn copy_into_vk_vec(&self, buffer: &mut Vec<u8>);
     fn copy_into_vk_buffer(&self, buffer: &mut [u8], start: usize) -> usize;
 }
-pub struct F32Vertex3 {
-    vertex: [f32; 3],
-}
 
-impl Vulkanic for F32Vertex3 {
-    fn copy_into_vk_vec(&self, buffer: &mut Vec<u8>) {
-        self.vertex
-            .iter()
-            .flat_map(|component| component.to_ne_bytes())
-            .for_each(|byte| buffer.push(byte));
+pub mod f32_vertex_3 {
+    pub struct F32Vertex3 {
+        pub vertex: [f32; 3],
     }
 
-    fn copy_into_vk_buffer(&self, buffer: &mut [u8], start: usize) -> usize {
-        assert!(buffer.len() >= start + size_of::<[f32; 3]>());
+    impl super::Vulkanic for F32Vertex3 {
+        fn copy_into_vk_vec(&self, buffer: &mut Vec<u8>) {
+            self.vertex
+                .iter()
+                .flat_map(|component| component.to_ne_bytes())
+                .for_each(|byte| buffer.push(byte));
+        }
 
-        self.vertex
-            .iter()
-            .flat_map(|component| component.to_ne_bytes())
-            .enumerate()
-            .for_each(|(index, byte)| buffer[start + index] = byte);
+        fn copy_into_vk_buffer(&self, buffer: &mut [u8], start: usize) -> usize {
+            assert!(buffer.len() >= start + size_of::<[f32; 3]>());
 
-        size_of::<[f32; 3]>()
+            self.vertex
+                .iter()
+                .flat_map(|component| component.to_ne_bytes())
+                .enumerate()
+                .for_each(|(index, byte)| buffer[start + index] = byte);
+
+            size_of::<[f32; 3]>()
+        }
+    }
+
+    pub fn new(vertex: [f32; 3]) -> F32Vertex3 {
+        F32Vertex3 { vertex }
     }
 }
 
-pub struct F32Vertex2 {
-    vertex: [f32; 2],
-}
-
-impl Vulkanic for F32Vertex2 {
-    fn copy_into_vk_vec(&self, buffer: &mut Vec<u8>) {
-        self.vertex
-            .iter()
-            .flat_map(|component| component.to_ne_bytes())
-            .for_each(|byte| buffer.push(byte));
+pub mod f32_vertex_2 {
+    pub struct F32Vertex2 {
+        pub vertex: [f32; 2],
     }
 
-    fn copy_into_vk_buffer(&self, buffer: &mut [u8], start: usize) -> usize {
-        assert!(buffer.len() >= start + size_of::<[f32; 2]>());
+    impl super::Vulkanic for F32Vertex2 {
+        fn copy_into_vk_vec(&self, buffer: &mut Vec<u8>) {
+            self.vertex
+                .iter()
+                .flat_map(|component| component.to_ne_bytes())
+                .for_each(|byte| buffer.push(byte));
+        }
 
-        self.vertex
-            .iter()
-            .flat_map(|component| component.to_ne_bytes())
-            .enumerate()
-            .for_each(|(index, byte)| buffer[start + index] = byte);
+        fn copy_into_vk_buffer(&self, buffer: &mut [u8], start: usize) -> usize {
+            assert!(buffer.len() >= start + size_of::<[f32; 2]>());
 
-        size_of::<[f32; 2]>()
+            self.vertex
+                .iter()
+                .flat_map(|component| component.to_ne_bytes())
+                .enumerate()
+                .for_each(|(index, byte)| buffer[start + index] = byte);
+
+            size_of::<[f32; 2]>()
+        }
+    }
+
+    pub fn new(vertex: [f32; 2]) -> F32Vertex2 {
+        F32Vertex2 { vertex }
     }
 }
 
@@ -217,9 +230,13 @@ impl Vulkanic for F64Vertex4 {
 }
 
 pub mod sampled_vertex_3 {
+    use crate::graphics::math_types::vertex::f32_vertex_2::F32Vertex2;
+    use crate::graphics::math_types::vertex::f32_vertex_3::F32Vertex3;
+
+    use super::{f32_vertex_2, f32_vertex_3};
     pub struct SampledVertex3 {
-        texture_coord: super::F32Vertex2,
-        vertex: super::F32Vertex3,
+        texture_coord: F32Vertex2,
+        vertex: F32Vertex3,
     }
 
     impl super::Vulkanic for SampledVertex3 {
@@ -239,8 +256,8 @@ pub mod sampled_vertex_3 {
 
     pub fn new(texture_coord: [f32; 2], vertex: [f32; 3]) -> SampledVertex3 {
         SampledVertex3 {
-            texture_coord,
-            vertex,
+            texture_coord: f32_vertex_2::new(texture_coord),
+            vertex: f32_vertex_3::new(vertex),
         }
     }
 }

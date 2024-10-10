@@ -4,7 +4,7 @@ use ash::vk::{
 };
 use graphics::image::DustImage;
 use graphics::pools::{get_graphics_queue_family, get_transfer_queue_family};
-use graphics::{bitmap, pools, transfer};
+use graphics::{bitmap, hud, pools, transfer};
 use log::debug;
 
 mod dust_errors;
@@ -77,12 +77,14 @@ fn main() {
         get_graphics_queue_family(),
     );
 
-    graphics::render::composite_hud(
-        &vk_context,
-        &finished.view,
-        finished.format,
-        transfer_complete_semaphore,
-    );
+    hud::initialize(&vk_context, finished);
+
+    // graphics::render::composite_hud(
+    //     &vk_context,
+    //     &finished.view,
+    //     finished.format,
+    //     transfer_complete_semaphore,
+    // );
 
     sleep(Duration::from_secs(3));
 

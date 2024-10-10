@@ -220,6 +220,7 @@ pub fn copy_to_buffer<T>(
 where
     T: Sized + Copy + Clone,
 {
+    debug!("In transfer::copy_to_buffer");
     let size_in_bytes = std::mem::size_of_val(data) as u64;
 
     let (transfer_buffer, mem_handle) = make_buffer_and_copy(data, ctxt);
@@ -233,6 +234,8 @@ where
         .src_offset(0)
         .dst_offset(0)];
 
+    debug!("Transfer buffer created and backed with memory");
+
     let cmd_buffer = crate::graphics::pools::reserve_transfer_buffer(ctxt);
 
     let begin_info =
@@ -242,6 +245,9 @@ where
         .src_stage_mask(PipelineStageFlags2::TRANSFER)
         .src_queue_family_index(pools::get_transfer_queue_family())
         .dst_queue_family_index(target_queue_family)
+        .buffer(perm_buffer)
+        .size(size_in_bytes)
+        .offset(0)
         .src_access_mask(AccessFlags2::TRANSFER_WRITE)];
 
     let release_dependency = DependencyInfo::default().buffer_memory_barriers(&release_barrier);
@@ -249,11 +255,15 @@ where
     let acquire_barrier = [BufferMemoryBarrier2::default()
         .dst_stage_mask(PipelineStageFlags2::ALL_COMMANDS)
         .dst_access_mask(AccessFlags2::MEMORY_READ_KHR)
+        .buffer(perm_buffer)
+        .size(size_in_bytes)
+        .offset(0)
         .src_queue_family_index(pools::get_transfer_queue_family())
         .dst_queue_family_index(target_queue_family)];
 
     let acquire_dependency = DependencyInfo::default().buffer_memory_barriers(&acquire_barrier);
 
+    debug!("Release and acquire dependency structures created.");
     // let buffer_write_barrier = BufferMemoryBarrier::default()
     //     .src_access_mask(AccessFlags::TRANSFER_WRITE)
     //     .dst_queue_family_index(QUEUE_FAMILY_IGNORED)
@@ -262,7 +272,10 @@ where
     //     .buffer(perm_buffer)
     //     .offset(0);
 
+    // Copy
+    debug!("Attempting to copy and then release the buffer from the transfer queue family.");
     unsafe {
+        debug!("Beginning command buffer recording.");
         match ctxt
             .logical_device
             // .begin_command_buffer(*cmd_buffer.first().unwrap(), &begin_info)
@@ -273,6 +286,8 @@ where
                 panic!("Failed to begin buffer: {:?}", msg);
             }
         }
+
+        debug!("Beginning buffer copy command.");
         ctxt.logical_device.cmd_copy_buffer(
             // *cmd_buffer.first().unwrap(),
             cmd_buffer,
@@ -281,9 +296,12 @@ where
             &copy_region,
         );
 
+        debug!("Placing pipeline barrier.");
+        // Release
         ctxt.logical_device
             .cmd_pipeline_barrier2(cmd_buffer, &release_dependency);
 
+        debug!("Ending command buffer recording.");
         match ctxt.logical_device.end_command_buffer(cmd_buffer) {
             Ok(_) => {}
             Err(msg) => {
@@ -292,6 +310,8 @@ where
         }
     }
 
+    debug!("Reached end of buffer fill segment.");
+
     let mut submit_buffers = [cmd_buffer];
     let signal_release_complete = [util::create_binary_semaphore(ctxt)];
     let fence_release_and_copy_complete = util::create_fence(ctxt);
@@ -299,12 +319,22 @@ where
         .signal_semaphores(&signal_release_complete)
         .command_buffers(&submit_buffers);
     unsafe {
-        ctxt.logical_device.queue_submit(
+        match ctxt.logical_device.queue_submit(
             ctxt.transfer_queue,
             &[copy_and_release_submit],
             fence_release_and_copy_complete,
-        )
+        ) {
+            Ok(_) => {}
+            Err(msg) => {
+                panic!(
+                    "Failed to submit the buffer on the transfer queue: {:?}",
+                    msg
+                );
+            }
+        };
     };
+
+    debug!("Copy and release completed.");
 
     let (queue, target_queue_cmd_buffer) =
         if target_queue_family == pools::get_transfer_queue_family() {
@@ -322,6 +352,8 @@ where
         .signal_semaphores(&signal_acquire_complete)
         .command_buffers(&submit_buffers)];
 
+    debug!("Attempting to acquire the buffer on its target queue.");
+    // Acquire
     unsafe {
         if let Err(msg) = ctxt
             .logical_device
@@ -334,9 +366,12 @@ where
         }
 
         ctxt.logical_device
-            .cmd_pipeline_barrier2(target_queue_cmd_buffer, &release_dependency);
+            .cmd_pipeline_barrier2(target_queue_cmd_buffer, &acquire_dependency);
 
-        if let Err(msg) = ctxt.logical_device.end_command_buffer(cmd_buffer) {
+        if let Err(msg) = ctxt
+            .logical_device
+            .end_command_buffer(target_queue_cmd_buffer)
+        {
             panic!(
                 "Could not end recording of command buffer for release: {:?}",
                 msg
