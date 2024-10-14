@@ -4,5 +4,6 @@ use ash::vk::Result;
 pub enum DustError {
     NoMatchingMemoryType,
     DeviceMemoryAllocationFailed(Result),
+    NoValidHeapForAllocation,
     CreateShaderModuleFailed(Result),
 }
