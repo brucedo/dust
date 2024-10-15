@@ -97,6 +97,17 @@ impl DustObjectStore {
         }
     }
 
+    pub fn get_image(&self, image_id: ImageId) -> Option<Image> {
+        match self.images.get(image_id) {
+            Some(image_tombstone_opt) =>
+                match image_tombstone_opt {
+                    Some(image_tombstone) => Some(image_tombstone.image), 
+                    None => None, 
+                } 
+            None => None 
+        }
+    }
+
     fn try_allocate(&mut self, image: Image, memory_requirements: &MemoryRequirements, type_index: usize) -> Result<ImageId, DustError> {
         // let image_memory_requirements = unsafe {
         //     self.device
@@ -224,6 +235,18 @@ impl DustObjectStore {
 
     pub fn allocate_local_visible_buffer(&mut self, buffer: Buffer) -> Result<BufferId, DustError> {
         self.allocate_buffer(buffer, MemoryPropertyFlags::DEVICE_LOCAL | MemoryPropertyFlags::HOST_VISIBLE)
+    }
+
+    pub fn get_buffer(&self, buffer_id: BufferId) -> Option<Buffer> {
+        match self.buffers.get(buffer_id) {
+            Some(buffer_tombstone_opt) => {
+                match buffer_tombstone_opt {
+                    Some(buffer_tombstone) => Some(buffer_tombstone.buffer), 
+                    None => None
+                }
+            }, 
+            None => None
+        }
     }
 
     fn allocate_buffer(&mut self, buffer: Buffer, required_flags: MemoryPropertyFlags) -> Result<BufferId, DustError> {
